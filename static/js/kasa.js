@@ -27,9 +27,22 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.on('masa_durumu_degisti', () => loadKasaData());
     socket.on('garson_onay_talebi', () => loadKasaData());
 
-    // F1 - F8 KLAVYE KISAYOLLARI DİNLEYİCİSİ
+    // F1 - F8 VE ESC KLAVYE KISAYOLLARI DİNLEYİCİSİ (ESC: KAPAT / GERİ DÖN, F5: YENİLE)
     document.addEventListener('keydown', (e) => {
-        if (['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8'].includes(e.key)) {
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            const activeModal = document.querySelector('.modal-overlay.active');
+            if (activeModal) {
+                activeModal.classList.remove('active');
+                return;
+            }
+            const masaDetay = document.getElementById('viewMasaDetay');
+            if (masaDetay && masaDetay.style.display !== 'none') {
+                closeMasaDetayView();
+                return;
+            }
+        }
+        if (['F1', 'F2', 'F3', 'F4', 'F6', 'F7', 'F8'].includes(e.key)) {
             e.preventDefault();
             handleShortcut(e.key);
         }
@@ -257,7 +270,7 @@ function renderActiveTicketWorkstation() {
             const lineTotal = parseFloat(d.ara_toplam) || ((parseFloat(d.adet) || 0) * (parseFloat(d.birim_fiyat) || 0));
             const uniqueId = `${o.id}_${idx}`;
             const isIkramNow = (uniqueId in ikramStateMap) ? ikramStateMap[uniqueId] : (d.is_ikram || false);
-            
+
             if (!isIkramNow) {
                 subtotal += lineTotal;
             }
@@ -313,7 +326,7 @@ function getActiveMasaSubtotal() {
     const table = kasaTables.find(t => t.id == activeMasaId);
     if (!table) return 0;
     const masaOrders = kasaOrders.filter(o => o.masa_id == table.id && o.odeme_durumu !== 'odendi' && o.siparis_durumu !== 'iptal');
-    
+
     let itemsTotalSum = 0;
     currentTableItems.forEach(item => {
         if (!item.isIkram) {
@@ -331,7 +344,7 @@ function getActiveMasaSubtotal() {
 
 function updateFinancialSummary(subtotal) {
     const subtotalVal = subtotal > 0 ? subtotal : getActiveMasaSubtotal();
-    
+
     let calculatedDiscount = 0;
     if (discountValue > 0) {
         if (discountType === 'percent') {
@@ -363,21 +376,30 @@ function updateFinancialSummary(subtotal) {
     if (elToplam) elToplam.innerText = `${toplamVal.toFixed(2)} ₺`;
     if (rowDiscountDetail) {
         if (discountValue > 0) {
-            rowDiscountDetail.style.display = 'flex';
+            rowDiscountDetail.style.visibility = 'visible';
             if (elDiscount) elDiscount.innerText = `${calculatedDiscount.toFixed(2)} ₺ (${discountType === 'percent' ? '%' + discountValue : 'Sabit'})`;
         } else {
-            rowDiscountDetail.style.display = 'none';
+            rowDiscountDetail.style.visibility = 'hidden';
         }
     }
     if (elOdenen) elOdenen.innerText = `${paidBefore.toFixed(2)} ₺`;
     if (elKalan) elKalan.innerText = `${kalanVal.toFixed(2)} ₺`;
-    
+
+    const btnClearTable = document.getElementById('btnManualClearTable');
+    if (btnClearTable) {
+        if (kalanVal <= 0.05 && subtotalVal > 0) {
+            btnClearTable.style.display = 'inline-flex';
+        } else {
+            btnClearTable.style.display = 'none';
+        }
+    }
+
     if (rowSecimDetail) {
         if (secimVal > 0) {
-            rowSecimDetail.style.display = 'flex';
+            rowSecimDetail.style.visibility = 'visible';
             if (elSecim) elSecim.innerText = `${secimVal.toFixed(2)} ₺`;
         } else {
-            rowSecimDetail.style.display = 'none';
+            rowSecimDetail.style.visibility = 'hidden';
         }
     }
 
@@ -401,7 +423,7 @@ window.updateDualPaymentSum = function () {
     if (discountValue > 0) {
         calculatedDiscount = discountType === 'percent' ? (subtotal * discountValue) / 100 : Math.min(subtotal, discountValue);
     }
-    const toplam = Math.max(0, subtotal - calculatedDiscount);
+    const remainingTotal = Math.max(0, subtotal - calculatedDiscount - paidBefore);
 
     const nakit = parseFloat(document.getElementById('tutarNakitInput')?.value) || 0;
     const kart = parseFloat(document.getElementById('tutarKartInput')?.value) || 0;
@@ -410,13 +432,17 @@ window.updateDualPaymentSum = function () {
     if (document.getElementById('dualSumLabel')) {
         let displaySum = currentInputPayment;
         if (displaySum === 0) {
-            let secimVal = 0;
-            currentTableItems.forEach(i => {
-                if (i.selected) {
-                    secimVal += (i.isIkram ? 0 : parseFloat(i.ara_toplam) || 0);
-                }
-            });
-            displaySum = secimVal > 0 ? secimVal : Math.max(0, toplam - paidBefore);
+            if (remainingTotal <= 0.05) {
+                displaySum = 0;
+            } else {
+                let secimVal = 0;
+                currentTableItems.forEach(i => {
+                    if (i.selected) {
+                        secimVal += (i.isIkram ? 0 : parseFloat(i.ara_toplam) || 0);
+                    }
+                });
+                displaySum = secimVal > 0 ? secimVal : remainingTotal;
+            }
         }
         document.getElementById('dualSumLabel').innerText = `${displaySum.toFixed(2)} ₺`;
     }
@@ -434,6 +460,11 @@ window.fillDualAmount = function (type) {
     }
     const remainingTotal = Math.max(0, subtotal - calculatedDiscount - paidBefore);
 
+    if (remainingTotal <= 0.05 && type !== 'clear') {
+        showKasaToast("⚠️ Masanın borcu zaten ödenmiştir.");
+        return;
+    }
+
     let secimVal = 0;
     currentTableItems.forEach(i => {
         if (i.selected) {
@@ -441,7 +472,7 @@ window.fillDualAmount = function (type) {
         }
     });
 
-    const targetAmount = secimVal > 0 ? secimVal : remainingTotal;
+    const targetAmount = (secimVal > 0 && remainingTotal > 0.05) ? secimVal : remainingTotal;
 
     const nakitEl = document.getElementById('tutarNakitInput');
     const kartEl = document.getElementById('tutarKartInput');
@@ -545,9 +576,11 @@ window.processQuickPayment = async function (paymentMethod) {
     renderActiveTicketWorkstation();
 };
 
-window.processMainPaymentSubmit = async function () {
+let pendingPaymentData = null;
+
+window.processMainPaymentSubmit = function () {
     if (!activeMasaId) {
-        alert("Lütfen tahsilat yapmak için önce bir masa seçiniz.");
+        showKasaToast("⚠️ Lütfen tahsilat yapmak için önce bir masa seçiniz.");
         return;
     }
 
@@ -563,6 +596,11 @@ window.processMainPaymentSubmit = async function () {
     }
     const remaining = Math.max(0, subtotal - calculatedDiscount - paidBefore);
 
+    if (remaining <= 0.05) {
+        showKasaToast("⚠️ Bu masanın hesabı zaten tamamen ödenmiştir (Kalan: 0.00 ₺). Masayı kapatabilir veya F8 ile fiş yazdırabilirsiniz.");
+        return;
+    }
+
     let nakitPay = parseFloat(document.getElementById('tutarNakitInput')?.value) || 0;
     let kartPay = parseFloat(document.getElementById('tutarKartInput')?.value) || 0;
 
@@ -576,40 +614,66 @@ window.processMainPaymentSubmit = async function () {
         const targetAmount = secimVal > 0 ? secimVal : remaining;
 
         if (targetAmount <= 0) {
-            alert("Adisyonda ödenecek tutar bulunmuyor.");
+            showKasaToast("⚠️ Adisyonda ödenecek tutar bulunmuyor.");
             return;
         }
 
-        const isNakit = confirm(`Ödemeyi NAKİT olarak almak için 'Tamam', KREDİ KARTI / POS olarak almak için 'İptal' butonuna basınız.\nTutar: ${targetAmount.toFixed(2)} ₺`);
-        if (isNakit) {
-            nakitPay = targetAmount;
-        } else {
-            kartPay = targetAmount;
+        nakitPay = targetAmount;
+        if (document.getElementById('tutarNakitInput')) {
+            document.getElementById('tutarNakitInput').value = targetAmount.toFixed(2);
         }
     }
 
     const totalInputPayment = nakitPay + kartPay;
     if (totalInputPayment <= 0) {
-        alert("Geçersiz ödeme tutarı.");
+        showKasaToast("⚠️ Geçersiz ödeme tutarı.");
         return;
     }
 
-    let confirmMsg = `${getFormattedMasaNo(table.masa_no)} için `;
-    if (nakitPay > 0 && kartPay > 0) {
-        confirmMsg += `${nakitPay.toFixed(2)} ₺ Nakit ve ${kartPay.toFixed(2)} ₺ Kredi Kartı ödemesi tahsil edilecek. Onaylıyor musunuz?`;
-    } else if (nakitPay > 0) {
-        confirmMsg += `${nakitPay.toFixed(2)} ₺ Nakit ödemesi tahsil edilecek. Onaylıyor musunuz?`;
-    } else {
-        confirmMsg += `${kartPay.toFixed(2)} ₺ Kredi Kartı ödemesi tahsil edilecek. Onaylıyor musunuz?`;
+    pendingPaymentData = {
+        table,
+        nakitPay,
+        kartPay,
+        totalInputPayment,
+        subtotal,
+        calculatedDiscount
+    };
+
+    const confirmMasaInfo = document.getElementById('posConfirmMasaInfo');
+    const confirmDetailsBox = document.getElementById('posConfirmDetailsBox');
+
+    if (confirmMasaInfo) {
+        confirmMasaInfo.innerText = `${getFormattedMasaNo(table.masa_no)} - ÖDEME ALINIYOR`;
     }
 
-    if (!confirm(confirmMsg)) return;
+    if (confirmDetailsBox) {
+        let html = ``;
+        if (nakitPay > 0) {
+            html += `<div style="display:flex; justify-content:space-between;"><span>💵 Nakit Ödeme:</span><strong style="color:#34d399; font-size:1.1rem;">${nakitPay.toFixed(2)} ₺</strong></div>`;
+        }
+        if (kartPay > 0) {
+            html += `<div style="display:flex; justify-content:space-between;"><span>💳 Kredi Kartı / POS:</span><strong style="color:#38bdf8; font-size:1.1rem;">${kartPay.toFixed(2)} ₺</strong></div>`;
+        }
+        html += `<div style="display:flex; justify-content:space-between; border-top:1px dashed rgba(255,255,255,0.2); padding-top:8px; margin-top:4px; font-weight:900; font-size:1.15rem; color:#fbbf24;"><span>TOPLAM TAHSİLAT:</span><strong>${totalInputPayment.toFixed(2)} ₺</strong></div>`;
+        confirmDetailsBox.innerHTML = html;
+    }
+
+    const modal = document.getElementById('posPaymentConfirmModal');
+    if (modal) modal.classList.add('active');
+};
+
+window.executeConfirmedMainPayment = async function (shouldPrintAndClose = false) {
+    if (!pendingPaymentData || !activeMasaId) return;
+
+    const { table, nakitPay, kartPay, totalInputPayment, subtotal, calculatedDiscount } = pendingPaymentData;
+
+    closeModal('posPaymentConfirmModal');
 
     if (!partialPaymentsMap[activeMasaId]) partialPaymentsMap[activeMasaId] = 0;
     partialPaymentsMap[activeMasaId] += totalInputPayment;
 
-    document.getElementById('tutarNakitInput').value = '';
-    document.getElementById('tutarKartInput').value = '';
+    if (document.getElementById('tutarNakitInput')) document.getElementById('tutarNakitInput').value = '';
+    if (document.getElementById('tutarKartInput')) document.getElementById('tutarKartInput').value = '';
     currentTableItems.forEach(i => i.selected = false);
 
     const paymentLabel = nakitPay > 0 && kartPay > 0 ? "Nakit + POS" : (nakitPay > 0 ? "Nakit" : "Kredi Kartı");
@@ -617,23 +681,46 @@ window.processMainPaymentSubmit = async function () {
 
     const updatedRemaining = Math.max(0, subtotal - calculatedDiscount - partialPaymentsMap[activeMasaId]);
 
-    if (updatedRemaining <= 0.05) {
+    if (shouldPrintAndClose) {
+        printReceiptPreview();
         try {
             await fetch(`/api/masalar/${activeMasaId}/clear`, { method: 'POST' });
             delete partialPaymentsMap[activeMasaId];
             discountValue = 0;
             const masaNo = getFormattedMasaNo(table.masa_no);
-            showKasaToast(`✅ ${masaNo} hesabı tamamen kapatıldı!`);
+            showKasaToast(`✅ ${masaNo} ödemesi alındı, fiş yazdırıldı ve masa kapatıldı!`);
+            pendingPaymentData = null;
             closeMasaDetayView();
             await loadKasaData();
             return;
         } catch (e) {
-            console.error("Masa kapatılamadı:", e);
+            console.error("Masa kapatma hatası:", e);
         }
+    } else {
+        if (updatedRemaining <= 0.05) {
+            showKasaToast(`💵 ${totalInputPayment.toFixed(2)} ₺ ödeme alındı! Borç sıfırlandı. (Masada kalındı - Fiş için F8)`);
+        } else {
+            showKasaToast(`💵 ${totalInputPayment.toFixed(2)} ₺ ödeme alındı. Kalan borç: ${updatedRemaining.toFixed(2)} ₺`);
+        }
+        pendingPaymentData = null;
+        renderActiveTicketWorkstation();
     }
+};
 
-    showKasaToast(`💵 ${totalInputPayment.toFixed(2)} ₺ ödeme alındı. Kalan: ${updatedRemaining.toFixed(2)} ₺`);
-    renderActiveTicketWorkstation();
+window.clearActiveTableManually = async function () {
+    if (!activeMasaId) return;
+    const table = kasaTables.find(t => t.id == activeMasaId);
+    try {
+        await fetch(`/api/masalar/${activeMasaId}/clear`, { method: 'POST' });
+        delete partialPaymentsMap[activeMasaId];
+        discountValue = 0;
+        const masaNo = table ? getFormattedMasaNo(table.masa_no) : '';
+        showKasaToast(`🧹 ${masaNo} borcu tamamen kapatıldı ve masa temizlendi!`);
+        closeMasaDetayView();
+        await loadKasaData();
+    } catch (e) {
+        console.error("Masa temizleme hatası:", e);
+    }
 };
 
 window.handleShortcut = function (key) {
@@ -722,7 +809,7 @@ window.applyIkramToSelectedItems = function () {
         alert("Lütfen ikram etmek veya ikramı iptal etmek istediğiniz en az 1 ürünü tablodan seçiniz.");
         return;
     }
-    
+
     const isFirstAlreadyIkram = selected[0].isIkram;
     selected.forEach(item => {
         item.isIkram = !isFirstAlreadyIkram;

@@ -6,7 +6,7 @@
     <meta name="viewport"
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Müşteri QR Menüsü</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=11">
+    <link rel="stylesheet" href="/static/css/style.css?v=50">
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 </head>
 
@@ -112,6 +112,12 @@
             <div id="pizzaSizeSection" style="display: none; margin-bottom: 16px;">
                 <div class="option-section-title">🍕 Pizza Boyutu Seçin (Çap & Kişi Sayısı)</div>
                 <div id="pizzaSizeGrid" class="size-options-grid"></div>
+            </div>
+
+            <!-- PIZZA HEDİYE İÇECEK SEÇİM ALANI -->
+            <div id="pizzaFreeDrinkSection" style="display: none; margin-bottom: 16px;">
+                <div class="option-section-title" id="freeDrinkTitle">🎁 Hediye İçecek Seçiniz (Ücretsiz)</div>
+                <div id="pizzaFreeDrinkGrid" class="size-options-grid"></div>
             </div>
 
             <!-- PORSIYON SEÇİM ALANI (YEMEKLER İÇİN) -->
@@ -245,7 +251,7 @@
         </div>
     </div>
 
-    <script src="/static/js/app.js?v=13"></script>
+    <script src="/static/js/app.js?v=60"></script>
 </body>
 
 </html>

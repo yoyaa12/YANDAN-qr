@@ -96,6 +96,7 @@ class UrunResponse(BaseModel):
 class KategoriResponse(BaseModel):
     id: int
     kategori_adi: str
+    gorsel_url: Optional[str] = None
 
 class MasaResponse(BaseModel):
     id: int

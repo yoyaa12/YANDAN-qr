@@ -13,6 +13,7 @@ let state = {
     cart: [],
     currentProduct: null,
     selectedSize: null,
+    selectedFreeDrink: null,
     selectedExtras: [],
     activeNotes: [],
     currentOrder: null,
@@ -64,9 +65,25 @@ function getCategoryIcon(catName) {
 // PIZZA BOYUTLARI
 const PIZZA_SIZES = [
     { id: 'small', name: 'Küçük Boy', detail: '20 cm • 1 Kişilik', priceDiff: 0 },
-    { id: 'medium', name: 'Orta Boy', detail: '26 cm • 1-2 Kişilik', priceDiff: 40.00 },
+    { id: 'medium', name: 'Orta Boy', detail: '26 cm • 1-2 Kişilik (🎁 Hediye İçecekli)', priceDiff: 40.00 },
     { id: 'large', name: 'Büyük Boy', detail: '32 cm • 2-3 Kişilik', priceDiff: 85.00 },
-    { id: 'jumbo', name: 'Jumbo Boy', detail: '40 cm • 3-4 Kişilik', priceDiff: 140.00 }
+    { id: 'jumbo', name: 'En Büyük Boy', detail: '40 cm • 3-4 Kişilik (🎁 Hediye İçecekli)', priceDiff: 140.00 }
+];
+
+// ORTA BOY HEDİYE İÇECEK SEÇENEKLERİ (1L veya 2 Büyük Ayran)
+const FREE_DRINKS_MEDIUM = [
+    { id: 'm_cola', name: '1L Coca-Cola', detail: '1 Litre Şişe' },
+    { id: 'm_fanta', name: '1L Fanta', detail: '1 Litre Şişe' },
+    { id: 'm_sprite', name: '1L Sprite', detail: '1 Litre Şişe' },
+    { id: 'm_ayran', name: '2x Büyük Ayran (330ml)', detail: '2 Adet 330ml Cam/Şişe' }
+];
+
+// EN BÜYÜK BOY HEDİYE İÇECEK SEÇENEKLERİ (1.5L veya 3 Büyük Ayran)
+const FREE_DRINKS_JUMBO = [
+    { id: 'j_cola', name: '1.5L Coca-Cola', detail: '1.5 Litre Şişe' },
+    { id: 'j_fanta', name: '1.5L Fanta', detail: '1.5 Litre Şişe' },
+    { id: 'j_sprite', name: '1.5L Sprite', detail: '1.5 Litre Şişe' },
+    { id: 'j_ayran', name: '3x Büyük Ayran (330ml)', detail: '3 Adet 330ml Cam/Şişe' }
 ];
 
 // PORSIYON SEÇENEKLERİ (YEMEKLER / IZGARALAR İÇİN)
@@ -271,9 +288,13 @@ function renderCategoryGrid() {
     state.kategoriler.forEach(cat => {
         const icon = getCategoryIcon(cat.kategori_adi);
         const isActive = state.activeKategoriId === cat.id;
+        const hasImg = cat.gorsel_url && cat.gorsel_url.trim().length > 0;
         html += `
             <div class="category-card-box ${isActive ? 'active' : ''}" onclick="selectCategory(${cat.id})">
-                <span class="category-card-icon">${icon}</span>
+                ${hasImg 
+                    ? `<img src="${cat.gorsel_url}" class="category-card-img" alt="${cat.kategori_adi}" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-block';"><span class="category-card-icon" style="display:none;">${icon}</span>`
+                    : `<span class="category-card-icon">${icon}</span>`
+                }
                 <span class="category-card-title">${cat.kategori_adi}</span>
             </div>
         `;
@@ -363,6 +384,7 @@ function openProductNoteModal(productId) {
 
     state.currentProduct = prod;
     state.selectedSize = PIZZA_SIZES[0];
+    state.selectedFreeDrink = null;
     state.selectedPortion = PORTION_OPTIONS[0];
     state.selectedExtras = [];
     state.activeNotes = [];
@@ -380,7 +402,10 @@ function openProductNoteModal(productId) {
 
     // Pizza Boyutları mi yoksa Yemek Porsiyonları mı?
     const pizzaSection = document.getElementById('pizzaSizeSection');
+    const freeDrinkSection = document.getElementById('pizzaFreeDrinkSection');
     const portionSection = document.getElementById('portionSizeSection');
+
+    if (freeDrinkSection) freeDrinkSection.style.display = 'none';
 
     if (isPizza) {
         if (pizzaSection) pizzaSection.style.display = 'block';
@@ -431,7 +456,50 @@ function renderPizzaSizes() {
 function selectPizzaSize(sizeId) {
     state.selectedSize = PIZZA_SIZES.find(s => s.id === sizeId) || PIZZA_SIZES[0];
     renderPizzaSizes();
+
+    const freeDrinkSection = document.getElementById('pizzaFreeDrinkSection');
+    if (freeDrinkSection) {
+        if (sizeId === 'medium' || sizeId === 'jumbo') {
+            freeDrinkSection.style.display = 'block';
+            const list = sizeId === 'medium' ? FREE_DRINKS_MEDIUM : FREE_DRINKS_JUMBO;
+            if (!state.selectedFreeDrink || !list.some(d => d.id === state.selectedFreeDrink.id)) {
+                state.selectedFreeDrink = list[0];
+            }
+            renderFreeDrinks(list, sizeId === 'medium' ? '🎁 Orta Boy Hediyesi (Ücretsiz İçecek Seçiniz)' : '🎁 En Büyük Boy Hediyesi (Ücretsiz İçecek Seçiniz)');
+        } else {
+            freeDrinkSection.style.display = 'none';
+            state.selectedFreeDrink = null;
+        }
+    }
+
     updateModalCalculatedPrice();
+}
+
+function renderFreeDrinks(list, titleText) {
+    const titleEl = document.getElementById('freeDrinkTitle');
+    const container = document.getElementById('pizzaFreeDrinkGrid');
+    if (titleEl) titleEl.innerText = titleText;
+    if (!container) return;
+
+    let html = '';
+    list.forEach(drink => {
+        const isSelected = state.selectedFreeDrink && state.selectedFreeDrink.id === drink.id;
+        html += `
+            <div class="size-option-card ${isSelected ? 'active' : ''}" onclick="selectFreeDrink('${drink.id}', '${drink.name.replace(/'/g, "\\'")}', '${drink.detail.replace(/'/g, "\\'")}')">
+                <div class="size-name">${drink.name}</div>
+                <div class="size-detail">${drink.detail}</div>
+                <div class="size-price-diff" style="color: #10b981; font-weight:800;">ÜCRETSİZ</div>
+            </div>
+        `;
+    });
+    container.innerHTML = html;
+}
+
+function selectFreeDrink(id, name, detail) {
+    state.selectedFreeDrink = { id, name, detail };
+    const list = state.selectedSize.id === 'medium' ? FREE_DRINKS_MEDIUM : FREE_DRINKS_JUMBO;
+    const title = state.selectedSize.id === 'medium' ? '🎁 Orta Boy Hediyesi (Ücretsiz İçecek Seçiniz)' : '🎁 En Büyük Boy Hediyesi (Ücretsiz İçecek Seçiniz)';
+    renderFreeDrinks(list, title);
 }
 
 function renderPortionSizes() {
@@ -595,6 +663,9 @@ function confirmAddToCart() {
     if (isPizza && state.selectedSize) {
         calculatedUnitPrice += state.selectedSize.priceDiff;
         fullTitle += ` (${state.selectedSize.name})`;
+        if (state.selectedFreeDrink) {
+            combinedNotes.push(`🎁 Hediye: ${state.selectedFreeDrink.name}`);
+        }
     } else if (isDish && state.selectedPortion) {
         calculatedUnitPrice = calculatedUnitPrice * state.selectedPortion.multiplier;
         if (state.selectedPortion.multiplier !== 1.0) {
