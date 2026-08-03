@@ -143,12 +143,50 @@ function playNotificationSound() {
     } catch (e) { }
 }
 
+function showSecurityError(msg) {
+    const errModal = document.getElementById('securityErrorModal');
+    const errMsg = document.getElementById('securityErrorMessage');
+    if(errMsg) errMsg.innerText = msg;
+    if(errModal) errModal.classList.add('active');
+    
+    // Arka planı gizle ki tıklama yapamasınlar
+    const mainLayout = document.querySelector('.menu-layout-container');
+    const cartDock = document.getElementById('cartStickyDock');
+    if (mainLayout) mainLayout.style.display = 'none';
+    if (cartDock) cartDock.style.display = 'none';
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
     const urlParams = new URLSearchParams(window.location.search);
     const masaParam = urlParams.get('masa') || '1';
+    const tokenParam = urlParams.get('token');
+    
     state.masaId = parseInt(masaParam);
     state.masaNo = `Masa ${state.masaId}`; // Fallback
     
+    // --- DİNAMİK QR GÜVENLİK KONTROLÜ ---
+    if (!tokenParam) {
+        showSecurityError("Geçersiz giriş! Lütfen masanızdaki QR kodu okutarak sisteme giriniz.");
+        return;
+    }
+    
+    try {
+        const verifyRes = await fetch(`/api/masalar/${state.masaId}/verify-qr`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: tokenParam })
+        });
+        const verifyData = await verifyRes.json();
+        if (!verifyData.valid) {
+            showSecurityError(verifyData.message || "Süresi dolmuş QR kod! Lütfen masadaki ekranı yenileyip güncel kodu okutun.");
+            return;
+        }
+    } catch(e) {
+        showSecurityError("Güvenlik doğrulaması yapılamadı. Sunucuya ulaşılamıyor.");
+        return;
+    }
+    // --- GÜVENLİK KONTROLÜ SONU ---
+
     try {
         const mRes = await fetch('/api/masalar');
         const mData = await mRes.json();

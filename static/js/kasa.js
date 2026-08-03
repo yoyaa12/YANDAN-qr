@@ -10,6 +10,16 @@ let discountType = 'percent'; // 'percent' or 'amount'
 let discountValue = 0;
 let partialPaymentsMap = {};
 
+// GİRİŞ KISITLAMASI (Küsürat limitleyici)
+window.limitDecimals = function(el) {
+    if (el.value.includes('.')) {
+        let parts = el.value.split('.');
+        if (parts[1].length > 2) {
+            el.value = parts[0] + '.' + parts[1].substring(0, 2);
+        }
+    }
+};
+
 document.addEventListener('DOMContentLoaded', () => {
     loadKasaData();
 
@@ -434,10 +444,10 @@ function updateFinancialSummary(subtotal) {
 
     const btnClearTable = document.getElementById('btnManualClearTable');
     if (btnClearTable) {
-        if (kalanVal <= 0.05 && subtotalVal > 0) {
-            btnClearTable.style.display = 'inline-flex';
-        } else {
+        if (!activeMasaId) {
             btnClearTable.style.display = 'none';
+        } else {
+            btnClearTable.style.display = 'flex';
         }
     }
 
@@ -813,12 +823,17 @@ window.executeConfirmedMainPayment = async function (shouldPrintAndClose = false
 window.clearActiveTableManually = async function () {
     if (!activeMasaId) return;
     const table = kasaTables.find(t => t.id == activeMasaId);
+    
+    const masaNo = table ? getFormattedMasaNo(table.masa_no) : '';
+    if (!confirm(`DİKKAT! ${masaNo} masasını zorla kapatmak ve temizlemek istediğinize emin misiniz? (Ödenmemiş siparişler varsa hepsi iptal edilecektir!)`)) {
+        return;
+    }
+    
     try {
         await fetch(`/api/masalar/${activeMasaId}/clear`, { method: 'POST' });
         delete partialPaymentsMap[activeMasaId];
         discountValue = 0;
-        const masaNo = table ? getFormattedMasaNo(table.masa_no) : '';
-        showKasaToast(`🧹 ${masaNo} borcu tamamen kapatıldı ve masa temizlendi!`);
+        showKasaToast(`🧹 ${masaNo} masası zorla kapatıldı ve temizlendi!`);
         closeMasaDetayView();
         await loadKasaData();
     } catch (e) {
@@ -860,7 +875,7 @@ window.openDiscountModal = function () {
         alert("Lütfen iskonto uygulamak için bir masa seçiniz.");
         return;
     }
-    document.getElementById('discountValueInput').value = discountValue || '';
+    document.getElementById('discountValueInput').value = discountValue ? parseFloat(discountValue).toFixed(2) : '';
     document.getElementById('discountModal').classList.add('active');
 };
 
@@ -875,12 +890,18 @@ window.setDiscountType = function (type) {
         if (btnP) { btnP.style.background = 'var(--primary)'; btnP.style.color = '#000'; }
         if (btnA) { btnA.style.background = 'rgba(255,255,255,0.1)'; btnA.style.color = '#fff'; }
         if (label) label.innerText = 'İndirim Oranı (%)';
-        if (quickGroup) quickGroup.style.display = 'flex';
+        if (quickGroup) {
+            quickGroup.style.visibility = 'visible';
+            quickGroup.style.pointerEvents = 'auto';
+        }
     } else {
         if (btnA) { btnA.style.background = 'var(--primary)'; btnA.style.color = '#000'; }
         if (btnP) { btnP.style.background = 'rgba(255,255,255,0.1)'; btnP.style.color = '#fff'; }
         if (label) label.innerText = 'İndirim Tutarı (₺)';
-        if (quickGroup) quickGroup.style.display = 'none';
+        if (quickGroup) {
+            quickGroup.style.visibility = 'hidden';
+            quickGroup.style.pointerEvents = 'none';
+        }
     }
 };
 
@@ -892,7 +913,8 @@ window.applyQuickPercent = function (percent) {
 };
 
 window.confirmDiscount = function () {
-    const val = parseFloat(document.getElementById('discountValueInput').value) || 0;
+    let val = parseFloat(document.getElementById('discountValueInput').value) || 0;
+    val = parseFloat(val.toFixed(2)); // Sadece 2 basamak
     discountValue = val;
     closeModal('discountModal');
     renderActiveTicketWorkstation();

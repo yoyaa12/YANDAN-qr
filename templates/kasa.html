@@ -6,7 +6,7 @@
     <meta name="viewport"
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Lezzet Dünyası Restoran POS Otomasyonu</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=21">
+    <link rel="stylesheet" href="/static/css/style.css?v=22">
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 </head>
 
@@ -108,9 +108,6 @@
                         <button type="button" class="btn-back-tables" onclick="closeMasaDetayView()">
                             ⬅️ Kapat (Masalara Dön)
                         </button>
-                        <button type="button" id="btnManualClearTable" class="btn-add" style="display: none; padding: 6px 12px; font-size: 0.82rem; background: linear-gradient(135deg, #10b981, #047857);" onclick="clearActiveTableManually()">
-                            🧹 Masayı Kapat & Temizle
-                        </button>
                         <h2 id="ticketMasaTitle">🪑 MASA SEÇİLMEDİ</h2>
                         <span id="ticketMasaStatusBadge" class="vega-badge-status">Masa Seçiniz</span>
                     </div>
@@ -194,7 +191,7 @@
                         <label style="font-size: 0.8rem; font-weight: 800; color: #34d399; margin-bottom: 4px; display: block;">💵 NAKİT ÖDEME (₺):</label>
                         <input type="number" id="tutarNakitInput" step="0.01" min="0" class="form-control"
                             style="background: rgba(0,0,0,0.6); color: #fff; padding: 8px; font-size: 1.2rem; font-weight: 900; text-align: center; border: 1px solid #10b981; width: 100%; box-sizing: border-box;"
-                            placeholder="0.00" oninput="updateDualPaymentSum()">
+                            placeholder="0.00" oninput="limitDecimals(this); updateDualPaymentSum()">
                     </div>
 
                     <!-- POS KUTUCUĞU -->
@@ -202,7 +199,7 @@
                         <label style="font-size: 0.8rem; font-weight: 800; color: #38bdf8; margin-bottom: 4px; display: block;">💳 KREDİ KARTI / POS (₺):</label>
                         <input type="number" id="tutarKartInput" step="0.01" min="0" class="form-control"
                             style="background: rgba(0,0,0,0.6); color: #fff; padding: 8px; font-size: 1.2rem; font-weight: 900; text-align: center; border: 1px solid #06b6d4; width: 100%; box-sizing: border-box;"
-                            placeholder="0.00" oninput="updateDualPaymentSum()">
+                            placeholder="0.00" oninput="limitDecimals(this); updateDualPaymentSum()">
                     </div>
                 </div>
 
@@ -244,6 +241,11 @@
                         <span class="btn-label">FİŞ YAZDIR</span>
                     </button>
                 </div>
+                
+                <!-- MASAYI KAPAT VE TEMİZLE BUTONU (HER ZAMAN GÖRÜNÜR) -->
+                <button type="button" id="btnManualClearTable" class="btn-add" style="width: 100%; display: flex; justify-content: center; padding: 12px; font-size: 1rem; font-weight: 900; background: linear-gradient(135deg, #ef4444, #b91c1c); border-radius: 12px; margin-top: 8px; box-shadow: 0 4px 14px rgba(239, 68, 68, 0.3);" onclick="clearActiveTableManually()">
+                    🧹 MASAYI TEMİZLE & ZORLA KAPAT
+                </button>
             </div>
 
         </section>
@@ -287,9 +289,9 @@
                 <label id="discInputLabel"
                     style="font-size: 0.85rem; font-weight: 700; color: var(--text-secondary); margin-bottom: 6px; display: block;">İndirim
                     Oranı (%):</label>
-                <input type="number" id="discountValueInput" step="0.5" min="0" class="form-control"
+                <input type="number" id="discountValueInput" step="0.01" min="0" class="form-control"
                     style="font-size: 1.3rem; font-weight: 800; text-align: center; background: rgba(0,0,0,0.5); color: #fff;"
-                    placeholder="0">
+                    placeholder="0" oninput="limitDecimals(this)" onkeydown="if(event.key === 'Enter') confirmDiscount()">
             </div>
 
             <div style="display: flex; gap: 10px;">

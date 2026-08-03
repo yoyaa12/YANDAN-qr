@@ -46,6 +46,16 @@
     -webkit-tap-highlight-color: transparent;
 }
 
+/* Number Input'lardaki sağdaki ok (spinner) tuşlarını gizle */
+input::-webkit-outer-spin-button,
+input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+input[type=number] {
+    -moz-appearance: textfield; /* Firefox */
+}
+
 html,
 body {
     overscroll-behavior-y: contain;
