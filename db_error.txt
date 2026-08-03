@@ -1,9 +1,0 @@
-('23000', "[23000] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]Cannot insert the value NULL into column 'kategori_id', table 'RestoranQRDB.dbo.Urunler'; column does not allow nulls. UPDATE fails. (515) (SQLExecDirectW); [23000] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]The statement has been terminated. (3621)")
-Traceback (most recent call last):
-  File "c:\Users\emre\Desktop\QR odeme\app\main.py", line 20, in startup_db_updates
-    run_enrichment()
-  File "c:\Users\emre\Desktop\QR odeme\enrich_menu.py", line 52, in run_enrichment
-    execute_non_query("UPDATE Urunler SET kategori_id = ? WHERE urun_adi LIKE '%Karışık Pizza%' OR urun_adi LIKE '%Karisik Pizza%'", (cat_map['Pizzalar'],))
-  File "c:\Users\emre\Desktop\QR odeme\app\database.py", line 169, in execute_non_query
-    cursor.execute(query, params)
-pyodbc.IntegrityError: ('23000', "[23000] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]Cannot insert the value NULL into column 'kategori_id', table 'RestoranQRDB.dbo.Urunler'; column does not allow nulls. UPDATE fails. (515) (SQLExecDirectW); [23000] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]The statement has been terminated. (3621)")
