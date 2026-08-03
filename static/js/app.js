@@ -19,7 +19,7 @@ let state = {
     currentOrder: null,
     selectedPaymentMethod: 'pos',
     language: localStorage.getItem('qr_language') || null,
-    deviceId: (function() {
+    deviceId: (function () {
         let did = localStorage.getItem('qr_device_id');
         if (!did) {
             did = 'dev-' + Math.random().toString(36).substr(2, 9) + '-' + Date.now();
@@ -146,9 +146,9 @@ function playNotificationSound() {
 function showSecurityError(msg) {
     const errModal = document.getElementById('securityErrorModal');
     const errMsg = document.getElementById('securityErrorMessage');
-    if(errMsg) errMsg.innerText = msg;
-    if(errModal) errModal.classList.add('active');
-    
+    if (errMsg) errMsg.innerText = msg;
+    if (errModal) errModal.classList.add('active');
+
     // Arka planı gizle ki tıklama yapamasınlar
     const mainLayout = document.querySelector('.menu-layout-container');
     const cartDock = document.getElementById('cartStickyDock');
@@ -160,16 +160,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     const urlParams = new URLSearchParams(window.location.search);
     const masaParam = urlParams.get('masa') || '1';
     const tokenParam = urlParams.get('token');
-    
+
     state.masaId = parseInt(masaParam);
     state.masaNo = `Masa ${state.masaId}`; // Fallback
-    
+
     // --- DİNAMİK QR GÜVENLİK KONTROLÜ ---
     if (!tokenParam) {
         showSecurityError("Geçersiz giriş! Lütfen masanızdaki QR kodu okutarak sisteme giriniz.");
         return;
     }
-    
+
     try {
         const verifyRes = await fetch(`/api/masalar/${state.masaId}/verify-qr`, {
             method: 'POST',
@@ -181,7 +181,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             showSecurityError(verifyData.message || "Süresi dolmuş QR kod! Lütfen masadaki ekranı yenileyip güncel kodu okutun.");
             return;
         }
-    } catch(e) {
+    } catch (e) {
         showSecurityError("Güvenlik doğrulaması yapılamadı. Sunucuya ulaşılamıyor.");
         return;
     }
@@ -329,10 +329,10 @@ function renderCategoryGrid() {
         const hasImg = cat.gorsel_url && cat.gorsel_url.trim().length > 0;
         html += `
             <div class="category-card-box ${isActive ? 'active' : ''}" onclick="selectCategory(${cat.id})">
-                ${hasImg 
-                    ? `<img src="${cat.gorsel_url}" class="category-card-img" alt="${cat.kategori_adi}" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-block';"><span class="category-card-icon" style="display:none;">${icon}</span>`
-                    : `<span class="category-card-icon">${icon}</span>`
-                }
+                ${hasImg
+                ? `<img src="${cat.gorsel_url}" class="category-card-img" alt="${cat.kategori_adi}" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-block';"><span class="category-card-icon" style="display:none;">${icon}</span>`
+                : `<span class="category-card-icon">${icon}</span>`
+            }
                 <span class="category-card-title">${cat.kategori_adi}</span>
             </div>
         `;
@@ -387,10 +387,10 @@ function renderProducts() {
             <div class="product-card ${isSelected ? 'selected' : ''}" onclick="openProductNoteModal(${prod.id})">
                 <div class="product-card-image-box">
                     ${hasImage
-                        ? `<img src="${prod.gorsel_url}" alt="${prod.urun_adi}" class="product-card-img" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                ? `<img src="${prod.gorsel_url}" alt="${prod.urun_adi}" class="product-card-img" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
                            <div class="product-card-placeholder" style="display:none;"><span>${icon}</span></div>`
-                        : `<div class="product-card-placeholder"><span>${icon}</span></div>`
-                    }
+                : `<div class="product-card-placeholder"><span>${icon}</span></div>`
+            }
                     <div class="product-badge-price">₺${prod.fiyat.toFixed(0)}</div>
                     <div class="product-badge-rating">★ ${rating}</div>
                 </div>
@@ -428,7 +428,25 @@ function openProductNoteModal(productId) {
     state.activeNotes = [];
 
     document.getElementById('modalProductTitle').innerText = prod.urun_adi;
-    document.getElementById('modalProductDesc').innerText = prod.aciklama || '';
+    
+    // Açıklama alanı
+    const descEl = document.getElementById('modalProductDesc');
+    if (prod.aciklama) {
+        descEl.innerText = prod.aciklama;
+        descEl.style.display = 'block';
+    } else {
+        descEl.style.display = 'none';
+    }
+
+    // Görsel Alanı
+    const imgEl = document.getElementById('modalProductImage');
+    if (prod.gorsel_url) {
+        imgEl.src = prod.gorsel_url;
+        imgEl.style.display = 'block';
+    } else {
+        imgEl.style.display = 'none';
+    }
+
     document.getElementById('modalProductNote').value = '';
     document.getElementById('modalQuantity').value = '1';
 
@@ -603,11 +621,11 @@ function renderQuickNotesChips(catName, prodName) {
 
     let chipsData = CUSTOM_CHIPS_MAP['corba_yemek'];
 
-    if (catName.includes('icecek') || prodName.includes('kola') || prodName.includes('ayran')) {
+    if (catName.includes('içecek') || catName.includes('icecek') || prodName.includes('kola') || prodName.includes('ayran') || prodName.includes('su')) {
         chipsData = CUSTOM_CHIPS_MAP['icecek'];
     } else if (catName.includes('pizza') || prodName.includes('pizza')) {
         chipsData = CUSTOM_CHIPS_MAP['pizza'];
-    } else if (catName.includes('tatli') || prodName.includes('kunefe')) {
+    } else if (catName.includes('tatlı') || catName.includes('tatli') || prodName.includes('künefe') || prodName.includes('kunefe')) {
         chipsData = CUSTOM_CHIPS_MAP['tatli'];
     }
 
@@ -784,7 +802,7 @@ window.changeModalQuantity = function (delta) {
 
 window.updateCartItemQuantity = function (index, delta) {
     if (!state.cart[index]) return;
-    
+
     // Eğer adet 1 ise ve azaltılmak isteniyorsa onay isteyelim
     if (state.cart[index].adet === 1 && delta === -1) {
         if (confirm("Bu ürünü sepetten kaldırmak istiyor musunuz?")) {
@@ -800,7 +818,7 @@ window.updateCartItemQuantity = function (index, delta) {
             state.cart[index].ara_toplam = state.cart[index].birim_fiyat * state.cart[index].adet;
         }
     }
-    
+
     notifyCartUpdateToSocket();
     updateCartUI();
     openCartModal();

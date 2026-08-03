@@ -42,6 +42,10 @@
                 <div id="tableBadge" class="table-badge-sidebar">
                     🪑 Masa 1
                 </div>
+                <button type="button" class="rulet-sidebar-btn" onclick="MasaRuleti.open()"
+                    style="display: none !important; margin-top: 8px; width: 100%; background: linear-gradient(135deg, #ffbc00, #ff8c00); color: #111; border: none; padding: 10px; border-radius: var(--radius-md); font-weight: 800; font-size: 0.85rem; cursor: pointer; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 4px 12px rgba(255,140,0,0.3);">
+                    🎰 Rulet Çevir
+                </button>
             </aside>
 
             <!-- SAĞ ÜRÜNLER İÇERİK ALANI -->
@@ -98,15 +102,15 @@
 
     <!-- 1. ÜRÜN DETAY & OPSİYON MODALİ -->
     <div id="productModal" class="modal-overlay">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3 id="modalProductTitle" style="font-size: 1.3rem;">Ürün Adı</h3>
-                <button class="modal-close" onclick="closeModal('productModal')">✖</button>
+        <div class="modal-content" style="padding: 0; overflow: hidden;">
+            <div style="position: relative;">
+                <img id="modalProductImage" src="" alt="Ürün Görseli" style="width: 100%; height: 240px; object-fit: cover; display: none;">
+                <button class="modal-close" onclick="closeModal('productModal')" style="position: absolute; top: 12px; right: 12px; background: rgba(0,0,0,0.6); border: none; border-radius: 50%; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; color: #fff; z-index: 10; cursor: pointer;">✖</button>
             </div>
-            <p id="modalProductDesc" style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 16px;"></p>
 
-            <div style="font-size: 1.5rem; font-weight: 800; color: #fbbf24; margin-bottom: 16px;"
-                id="modalProductPrice">0.00 ₺</div>
+            <div style="padding: 24px;">
+                <h3 id="modalProductTitle" style="font-size: 1.5rem; font-weight: 900; margin-bottom: 6px;">Ürün Adı</h3>
+                <p id="modalProductDesc" style="color: var(--text-secondary); font-size: 0.95rem; margin-bottom: 16px;"></p>
 
             <!-- PIZZA BOYUT SEÇİM ALANI -->
             <div id="pizzaSizeSection" style="display: none; margin-bottom: 16px;">
@@ -155,11 +159,15 @@
                     style="width: 100%;">
             </div>
 
-            <button class="btn-add"
-                style="width: 100%; justify-content: center; margin-top: 24px; padding: 14px; font-size: 1rem;"
-                onclick="confirmAddToCart()">
-                Sepete Ekle
-            </button>
+            <div style="display: flex; gap: 16px; align-items: center; margin-top: 24px;">
+                <div style="font-size: 1.6rem; font-weight: 900; color: #fbbf24; white-space: nowrap;" id="modalProductPrice">0.00 ₺</div>
+                <button class="btn-add"
+                    style="flex: 1; justify-content: center; padding: 14px; font-size: 1.05rem;"
+                    onclick="confirmAddToCart()">
+                    Sepete Ekle
+                </button>
+            </div>
+            </div>
         </div>
     </div>
 
@@ -256,7 +264,8 @@
         <div class="modal-content" style="text-align: center; border-top: 4px solid var(--danger);">
             <div style="font-size: 3rem; margin-bottom: 12px;">🚫</div>
             <h2 style="font-size: 1.5rem; margin-bottom: 8px; color: var(--danger);">Erişim Reddedildi!</h2>
-            <p id="securityErrorMessage" style="color: var(--text-secondary); font-size: 0.95rem; margin-bottom: 10px;">Lütfen masanızdaki güncel QR kodu okutunuz.</p>
+            <p id="securityErrorMessage" style="color: var(--text-secondary); font-size: 0.95rem; margin-bottom: 10px;">
+                Lütfen masanızdaki güncel QR kodu okutunuz.</p>
         </div>
     </div>
 

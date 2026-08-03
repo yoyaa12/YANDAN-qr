@@ -52,8 +52,10 @@ input::-webkit-inner-spin-button {
     -webkit-appearance: none;
     margin: 0;
 }
+
 input[type=number] {
-    -moz-appearance: textfield; /* Firefox */
+    -moz-appearance: textfield;
+    /* Firefox */
 }
 
 html,
@@ -221,7 +223,7 @@ textarea:focus {
     display: flex;
     flex-direction: column;
     gap: 10px;
-    padding: 4px 8px; /* Gölgenin yanlardan taşmasına izin ver */
+    padding: 4px 8px; /* Gölgenin taşması için */
     scrollbar-width: thin;
     scrollbar-color: rgba(6, 182, 212, 0.3) transparent;
     -webkit-overflow-scrolling: touch;
@@ -299,7 +301,7 @@ textarea:focus {
 .category-card-box:hover {
     border-color: rgba(245, 158, 11, 0.6);
     transform: translateY(-3px);
-    box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
 }
 
 .category-card-box.active {
@@ -389,7 +391,7 @@ textarea:focus {
 
 .product-card:hover {
     border-color: rgba(245, 158, 11, 0.5);
-    box-shadow: 0 10px 25px rgba(0,0,0,0.5), 0 0 15px rgba(245, 158, 11, 0.15);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5), 0 0 15px rgba(245, 158, 11, 0.15);
     transform: translateY(-4px);
 }
 
@@ -687,7 +689,7 @@ textarea:focus {
     border-radius: 100px;
     padding: 8px 10px;
     z-index: 150;
-    box-shadow: 0 15px 35px rgba(0,0,0,0.5), 0 0 20px rgba(245, 158, 11, 0.25);
+    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.5), 0 0 20px rgba(245, 158, 11, 0.25);
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -762,7 +764,7 @@ textarea:focus {
     width: 100%;
     max-width: 520px;
     padding: 24px;
-    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.8), inset 0 0 15px rgba(255,255,255,0.05);
+    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.8), inset 0 0 15px rgba(255, 255, 255, 0.05);
     transform: translateY(30px) scale(0.98);
     transition: all 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     max-height: 90vh;
@@ -1260,14 +1262,16 @@ textarea:focus {
         transform: translate(-50%, -20px);
         opacity: 0;
     }
+
     to {
         transform: translate(-50%, 0);
         opacity: 1;
     }
 }
-        transform: translateY(0);
-        opacity: 1;
-    }
+
+transform: translateY(0);
+opacity: 1;
+}
 }
 
 /* 6 HANELİ GARSON PIN NUMPAD STİLLERİ */
@@ -2168,7 +2172,8 @@ textarea:focus {
 /* ==========================================================================
    KASA / POS EKRAAN KİLİTLEME & DÜZEN KAYMALARINI ÖNLEME STİLLERİ
    ========================================================================== */
-html, body.vega-kasa-body {
+html,
+body.vega-kasa-body {
     height: 100vh !important;
     max-height: 100vh !important;
     width: 100vw !important;
@@ -2221,7 +2226,8 @@ html, body.vega-kasa-body {
         margin: 0mm !important;
     }
 
-    html, body {
+    html,
+    body {
         width: 80mm !important;
         max-width: 80mm !important;
         margin: 0 !important;
@@ -2309,8 +2315,13 @@ html, body.vega-kasa-body {
 }
 
 @keyframes movePulse {
-    from { box-shadow: 0 0 8px rgba(99, 102, 241, 0.4); }
-    to { box-shadow: 0 0 20px rgba(99, 102, 241, 0.8); }
+    from {
+        box-shadow: 0 0 8px rgba(99, 102, 241, 0.4);
+    }
+
+    to {
+        box-shadow: 0 0 20px rgba(99, 102, 241, 0.8);
+    }
 }
 
 .vega-table-card.source-selected {
