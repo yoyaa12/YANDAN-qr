@@ -12,10 +12,14 @@ from app.api.v1.api import api_router
 
 app = FastAPI(title="QR Restoran Sipariş Otomasyonu API")
 
+from app.core.image_loader import sync_product_images
+
 @app.on_event("startup")
 async def startup_db_updates():
     try:
         execute_non_query("IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Kategoriler' AND COLUMN_NAME = 'gorsel_url') ALTER TABLE Kategoriler ADD gorsel_url NVARCHAR(255) NULL;")
+        execute_non_query("IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'Masalar' AND COLUMN_NAME = 'totp_secret') ALTER TABLE Masalar ADD totp_secret VARCHAR(64) NULL;")
+        sync_product_images()
     except Exception as e:
         print("Startup migration notice:", e)
 
