@@ -443,17 +443,7 @@ textarea:focus {
 }
 
 .product-badge-rating {
-    position: absolute;
-    top: 4px;
-    right: 4px;
-    background: rgba(11, 15, 25, 0.85);
-    backdrop-filter: blur(8px);
-    padding: 1px 5px;
-    border-radius: 6px;
-    font-size: 0.68rem;
-    font-weight: 800;
-    color: #fbbf24;
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    display: none !important;
 }
 
 .product-card-body {
@@ -483,18 +473,11 @@ textarea:focus {
 }
 
 .product-card-footer {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 2px 0 0 0;
-    margin-top: auto;
-    margin-bottom: auto;
+    display: none !important;
 }
 
 .product-price-bottom {
-    font-size: 0.95rem;
-    font-weight: 800;
-    color: var(--primary);
+    display: none !important;
 }
 
 .product-card-footer-right {
