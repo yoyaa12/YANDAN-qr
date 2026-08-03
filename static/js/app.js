@@ -165,25 +165,27 @@ document.addEventListener('DOMContentLoaded', async () => {
     state.masaNo = `Masa ${state.masaId}`; // Fallback
 
     // --- DİNAMİK QR GÜVENLİK KONTROLÜ ---
-    if (!tokenParam) {
-        showSecurityError("Geçersiz giriş! Lütfen masanızdaki QR kodu okutarak sisteme giriniz.");
-        return;
-    }
-
-    try {
-        const verifyRes = await fetch(`/api/masalar/${state.masaId}/verify-qr`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: tokenParam })
-        });
-        const verifyData = await verifyRes.json();
-        if (!verifyData.valid) {
-            showSecurityError(verifyData.message || "Süresi dolmuş QR kod! Lütfen masadaki ekranı yenileyip güncel kodu okutun.");
+    if (state.masaId !== 99) {
+        if (!tokenParam) {
+            showSecurityError("Geçersiz giriş! Lütfen masanızdaki QR kodu okutarak sisteme giriniz.");
             return;
         }
-    } catch (e) {
-        showSecurityError("Güvenlik doğrulaması yapılamadı. Sunucuya ulaşılamıyor.");
-        return;
+
+        try {
+            const verifyRes = await fetch(`/api/masalar/${state.masaId}/verify-qr`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: tokenParam })
+            });
+            const verifyData = await verifyRes.json();
+            if (!verifyData.valid) {
+                showSecurityError(verifyData.message || "Süresi dolmuş QR kod! Lütfen masadaki ekranı yenileyip güncel kodu okutun.");
+                return;
+            }
+        } catch (e) {
+            showSecurityError("Güvenlik doğrulaması yapılamadı. Sunucuya ulaşılamıyor.");
+            return;
+        }
     }
     // --- GÜVENLİK KONTROLÜ SONU ---
 
@@ -621,11 +623,11 @@ function renderQuickNotesChips(catName, prodName) {
 
     let chipsData = CUSTOM_CHIPS_MAP['corba_yemek'];
 
-    if (catName.includes('içecek') || catName.includes('icecek') || prodName.includes('kola') || prodName.includes('ayran') || prodName.includes('su')) {
+    if (catName === 'içecekler' || catName === 'icecekler') {
         chipsData = CUSTOM_CHIPS_MAP['icecek'];
-    } else if (catName.includes('pizza') || prodName.includes('pizza')) {
+    } else if (catName === 'pizzalar' || catName === 'pizza') {
         chipsData = CUSTOM_CHIPS_MAP['pizza'];
-    } else if (catName.includes('tatlı') || catName.includes('tatli') || prodName.includes('künefe') || prodName.includes('kunefe')) {
+    } else if (catName === 'tatlılar' || catName === 'tatlilar') {
         chipsData = CUSTOM_CHIPS_MAP['tatli'];
     }
 
