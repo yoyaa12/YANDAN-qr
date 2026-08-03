@@ -430,7 +430,7 @@ function openProductNoteModal(productId) {
     state.activeNotes = [];
 
     document.getElementById('modalProductTitle').innerText = prod.urun_adi;
-    
+
     // Açıklama alanı
     const descEl = document.getElementById('modalProductDesc');
     if (prod.aciklama) {
