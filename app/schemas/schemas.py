@@ -118,3 +118,13 @@ class KullaniciResponse(BaseModel):
     garson_adi: Optional[str] = None
     rol: Optional[str] = None
 
+class SiparisIslemCevapModel(BaseModel):
+    status: str
+    message: str
+    siparis: SiparisResponse
+
+class SiparisDurumIslemCevapModel(BaseModel):
+    status: str
+    message: str
+    data: SiparisDurumResponse
+

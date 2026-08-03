@@ -1253,11 +1253,6 @@ textarea:focus {
     }
 }
 
-transform: translateY(0);
-opacity: 1;
-}
-}
-
 /* 6 HANELİ GARSON PIN NUMPAD STİLLERİ */
 .pin-display-container {
     display: flex;
