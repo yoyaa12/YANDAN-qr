@@ -38,7 +38,7 @@
                     </p>
                 </div>
                 <div style="display: flex; flex-direction: column; gap: 8px;">
-                    <a href="/menu?masa=1" class="btn-add" style="justify-content: center;">
+                    <a id="btnMasa1" href="/menu?masa=1" class="btn-add" style="justify-content: center;">
                         🪑 Masa 1 QR Menüsü Aç
                     </a>
                     <a href="/menu?masa=2" class="btn-add" style="justify-content: center; background: rgba(255,255,255,0.08); color:#fff; box-shadow:none;">
@@ -102,5 +102,15 @@
         </div>
     </main>
 
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            if (window.location.hostname === '192.168.1.100' || window.location.host === '192.168.1.100:8000') {
+                const btnMasa1 = document.getElementById('btnMasa1');
+                if (btnMasa1) {
+                    btnMasa1.href = '/menu?masa=99';
+                }
+            }
+        });
+    </script>
 </body>
 </html>

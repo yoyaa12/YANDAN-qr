@@ -127,27 +127,14 @@
                     </button>
                 </div>
 
-                <!-- ADİSYON KALEMLERİ TABLOSU (SATIRA Doğrudan Tıklanarak Seçim Yapılır - Checkbox YOK) -->
-                <div class="vega-ticket-table-wrapper" style="flex: 1; overflow-y: auto;">
-                    <table class="vega-ticket-table">
-                        <thead>
-                            <tr>
-                                <th>Ürün Adı & Notu</th>
-                                <th style="text-align: center; width: 60px;">Adet</th>
-                                <th style="text-align: right; width: 100px;">Birim Fiyat</th>
-                                <th style="text-align: right; width: 120px;">İskonto/İkram</th>
-                                <th style="text-align: right; width: 100px;">Toplam</th>
-                            </tr>
-                        </thead>
-                        <tbody id="ticketItemsBody">
-                            <tr>
-                                <td colspan="5" class="vega-empty-ticket">
-                                    <div style="font-size: 2.5rem; margin-bottom: 8px;">🛒</div>
-                                    <div>Lütfen masalar ekranından bir masaya tıklayınız.</div>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
+                <!-- SİPARİŞ FİŞ PAKETLERİ (ORDER BATCHES) Kapsayıcısı -->
+                <div id="ticketBatchesWrapper" class="vega-ticket-table-wrapper" style="flex: 1; overflow-y: auto; padding: 12px;">
+                    <div id="ticketItemsBody">
+                        <div class="vega-empty-ticket" style="text-align: center; padding: 40px 20px; color: var(--text-muted);">
+                            <div style="font-size: 2.5rem; margin-bottom: 8px;">🛒</div>
+                            <div>Lütfen masalar ekranından bir masaya tıklayınız.</div>
+                        </div>
+                    </div>
                 </div>
             </div>
 

@@ -276,6 +276,38 @@ window.toggleRowSelection = function (index) {
     }
 };
 
+window.paySingleSiparisBatch = async function (siparisId, tutar) {
+    if (!confirm(`Fiş #${siparisId} paketinin ${tutar.toFixed(2)} ₺ tutarındaki ödemesini alıp kapatmak istiyor musunuz?`)) {
+        return;
+    }
+    try {
+        const res = await fetch(`/api/siparisler/${siparisId}/durum`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                yeni_durum: 'nakit_tahsil_edildi',
+                garson_adi: 'Kasa Yetkilisi'
+            })
+        });
+        const data = await res.json();
+        if (res.ok && data.status === 'success') {
+            const banner = document.getElementById('paymentFeedbackBanner');
+            const feedbackText = document.getElementById('feedbackText');
+            if (banner && feedbackText) {
+                feedbackText.innerText = `Fiş #${siparisId} (${tutar.toFixed(2)} ₺) Tahsil Edildi ve Kapatıldı!`;
+                banner.style.display = 'flex';
+            }
+            await loadKasaData();
+            renderActiveTicketWorkstation();
+        } else {
+            alert("Fiş tahsilatı yapılırken hata oluştu: " + (data.message || 'Bilinmeyen hata'));
+        }
+    } catch (e) {
+        console.error("Single batch pay error:", e);
+        alert("Bağlantı hatası!");
+    }
+};
+
 function renderActiveTicketWorkstation() {
     const table = kasaTables.find(t => t.id == activeMasaId);
     const titleEl = document.getElementById('ticketMasaTitle');
@@ -287,7 +319,7 @@ function renderActiveTicketWorkstation() {
         if (titleEl) titleEl.innerText = "🪑 MASA SEÇİLMEDİ";
         if (badgeEl) { badgeEl.innerText = "Masa Seçiniz"; badgeEl.className = "vega-badge-status"; }
         if (metaEl) metaEl.innerText = "";
-        if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="vega-empty-ticket"><div style="font-size:2.5rem; margin-bottom:8px;">🛒</div><div>Lütfen masalar ekranından bir masaya tıklayınız.</div></td></tr>`;
+        if (tbody) tbody.innerHTML = `<div class="vega-empty-ticket" style="text-align:center; padding:40px 20px; color:var(--text-muted);"><div style="font-size:2.5rem; margin-bottom:8px;">🛒</div><div>Lütfen masalar ekranından bir masaya tıklayınız.</div></div>`;
         updateFinancialSummary(0);
         return;
     }
@@ -300,13 +332,6 @@ function renderActiveTicketWorkstation() {
     if (badgeEl) {
         badgeEl.innerText = isHesap ? '🟡 HESAP İSTENDİ' : (isDolu ? '🔴 HESAP AÇIK' : '🟢 BOŞ');
         badgeEl.className = isHesap ? 'vega-badge-status status-hesap' : (isDolu ? 'vega-badge-status status-dolu' : 'vega-badge-status status-bos');
-    }
-    if (metaEl) {
-        metaEl.innerHTML = `
-            <button type="button" class="btn-add" style="font-size:0.78rem; padding:4px 10px; background:linear-gradient(135deg, #f59e0b, #d97706); font-weight:bold;" onclick="showDynamicQRModal(${table.id})">
-                📱 Canlı Dinamik QR (Simülatör)
-            </button>
-        `;
     }
 
     const isFirstLoad = (currentTableItems.length === 0);
@@ -322,58 +347,119 @@ function renderActiveTicketWorkstation() {
     currentTableItems = [];
     let subtotal = 0;
 
-    masaOrders.forEach(o => {
-        (o.detaylar || []).forEach((d, idx) => {
-            const lineTotal = parseFloat(d.ara_toplam) || ((parseFloat(d.adet) || 0) * (parseFloat(d.birim_fiyat) || 0));
-            const uniqueId = `${o.id}_${idx}`;
-            const isIkramNow = (uniqueId in ikramStateMap) ? ikramStateMap[uniqueId] : (d.is_ikram || false);
+    if (masaOrders.length === 0) {
+        if (metaEl) {
+            metaEl.innerHTML = `<span>Açık Sipariş Bulunmuyor</span>`;
+        }
+        if (tbody) {
+            tbody.innerHTML = `<div class="vega-empty-ticket" style="text-align:center; padding:40px 20px; color:var(--text-muted);"><div style="font-size:2.5rem; margin-bottom:8px;">🍽️</div><div>Bu masaya ait açık sipariş bulunmuyor.</div></div>`;
+        }
+    } else {
+        let batchesHtml = '';
+        masaOrders.forEach((o) => {
+            let batchTotal = 0;
+            let itemsRows = '';
 
-            if (!isIkramNow) {
-                subtotal += lineTotal;
+            (o.detaylar || []).forEach((d, idx) => {
+                const lineTotal = parseFloat(d.ara_toplam) || ((parseFloat(d.adet) || 0) * (parseFloat(d.birim_fiyat) || 0));
+                const uniqueId = `${o.id}_${idx}`;
+                const isIkramNow = (uniqueId in ikramStateMap) ? ikramStateMap[uniqueId] : (d.is_ikram || false);
+
+                if (!isIkramNow) {
+                    batchTotal += lineTotal;
+                    subtotal += lineTotal;
+                }
+
+                currentTableItems.push({
+                    uniqueId: uniqueId,
+                    siparis_id: o.id,
+                    urun_adi: d.urun_adi,
+                    adet: parseInt(d.adet) || 1,
+                    birim_fiyat: parseFloat(d.birim_fiyat) || 0,
+                    ara_toplam: lineTotal,
+                    urun_notu: d.urun_notu || '',
+                    isIkram: isIkramNow,
+                    selected: !!selectedStateMap[uniqueId]
+                });
+
+                itemsRows += `
+                    <tr class="ticket-row-clickable ${selectedStateMap[uniqueId] ? 'selected-row' : ''} ${isIkramNow ? 'ikram-row' : ''}">
+                        <td>
+                            <strong style="color:#fff;">${d.urun_adi}</strong>
+                            ${d.urun_notu ? `<div style="font-size:0.75rem; color:var(--text-secondary);">${d.urun_notu}</div>` : ''}
+                        </td>
+                        <td style="text-align: center; font-weight:800; color:#fff;">${d.adet}</td>
+                        <td style="text-align: right; color:#94a3b8;">${parseFloat(d.birim_fiyat).toFixed(2)} ₺</td>
+                        <td style="text-align: right; font-weight:700;">
+                            ${isIkramNow ? `<span style="color:#ef4444; background:rgba(239,68,68,0.15); padding:2px 6px; border-radius:4px;">🎁 İKRAM (0 ₺)</span>` : '-'}
+                        </td>
+                        <td style="text-align: right; font-weight:800; color:#fbbf24;">${isIkramNow ? '0.00 ₺' : lineTotal.toFixed(2) + ' ₺'}</td>
+                    </tr>
+                `;
+            });
+
+            const isPaid = (o.odeme_durumu === 'odendi');
+            let createdTimeStr = '';
+            if (o.olusturma_tarihi) {
+                if (o.olusturma_tarihi.includes('T')) {
+                    createdTimeStr = o.olusturma_tarihi.split('T')[1].substring(0, 5);
+                } else if (o.olusturma_tarihi.length >= 16) {
+                    createdTimeStr = o.olusturma_tarihi.substring(11, 16);
+                }
             }
 
-            currentTableItems.push({
-                uniqueId: uniqueId,
-                siparis_id: o.id,
-                urun_adi: d.urun_adi,
-                adet: parseInt(d.adet) || 1,
-                birim_fiyat: parseFloat(d.birim_fiyat) || 0,
-                ara_toplam: lineTotal,
-                urun_notu: d.urun_notu || '',
-                isIkram: isIkramNow,
-                selected: !!selectedStateMap[uniqueId]
-            });
-        });
-    });
+            batchesHtml += `
+                <div class="batch-card" style="background: rgba(15, 23, 42, 0.85); border: 1.5px solid rgba(255, 255, 255, 0.12); border-radius: 12px; margin-bottom: 16px; padding: 14px; box-shadow: 0 4px 14px rgba(0,0,0,0.3);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 8px; margin-bottom: 10px;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <span style="font-size: 1.05rem; font-weight: 800; color: #fbbf24;">📦 FİŞ #${o.id} (${o.siparis_kodu || 'SİPARİŞ'})</span>
+                            ${createdTimeStr ? `<span style="font-size: 0.8rem; background: rgba(255,255,255,0.08); color: #cbd5e1; padding: 2px 8px; border-radius: 6px;">⏰ Saat: ${createdTimeStr}</span>` : ''}
+                        </div>
+                        <div>
+                            ${isPaid 
+                                ? `<span style="background: rgba(16,185,129,0.2); color:#34d399; border:1px solid rgba(16,185,129,0.4); padding:3px 8px; border-radius:6px; font-size:0.8rem; font-weight:700;">✅ ÖDENDİ</span>` 
+                                : `<span style="background: rgba(245,158,11,0.2); color:#fbbf24; border:1px solid rgba(245,158,11,0.4); padding:3px 8px; border-radius:6px; font-size:0.8rem; font-weight:700;">⏳ NAKİT TAHSİLAT BEKLİYOR</span>`}
+                        </div>
+                    </div>
 
-    if (metaEl) {
-        metaEl.innerHTML = `
-            <span>Kalem Sayısı: <strong>${currentTableItems.length} Ürün</strong></span> | 
-            <span>Sipariş Sayısı: <strong>${masaOrders.length} Adisyon</strong></span>
-        `;
-    }
+                    <table class="vega-ticket-table" style="width:100%; margin-bottom: 10px;">
+                        <thead>
+                            <tr>
+                                <th>Ürün Adı & Notu</th>
+                                <th style="text-align: center; width: 60px;">Adet</th>
+                                <th style="text-align: right; width: 100px;">Birim Fiyat</th>
+                                <th style="text-align: right; width: 120px;">İskonto/İkram</th>
+                                <th style="text-align: right; width: 100px;">Toplam</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${itemsRows}
+                        </tbody>
+                    </table>
 
-    if (currentTableItems.length === 0) {
-        if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="vega-empty-ticket"><div style="font-size:2rem; margin-bottom:6px;">🍽️</div><div>Bu masaya ait açık sipariş bulunmuyor.</div></td></tr>`;
-    } else {
-        let html = '';
-        currentTableItems.forEach((item, index) => {
-            html += `
-                <tr class="ticket-row-clickable ${item.selected ? 'selected-row' : ''} ${item.isIkram ? 'ikram-row' : ''}" onclick="toggleRowSelection(${index})">
-                    <td>
-                        <strong style="color:#fff;">${item.urun_adi}</strong>
-                        ${item.urun_notu ? `<div style="font-size:0.75rem; color:var(--text-secondary);">${item.urun_notu}</div>` : ''}
-                    </td>
-                    <td style="text-align: center; font-weight:800; color:#fff;">${item.adet}</td>
-                    <td style="text-align: right; color:#94a3b8;">${item.birim_fiyat.toFixed(2)} ₺</td>
-                    <td style="text-align: right; font-weight:700;">
-                        ${item.isIkram ? `<span style="color:#ef4444; background:rgba(239,68,68,0.15); padding:2px 6px; border-radius:4px;">🎁 İKRAM (0 ₺)</span>` : '-'}
-                    </td>
-                    <td style="text-align: right; font-weight:800; color:#fbbf24;">${item.isIkram ? '0.00 ₺' : item.ara_toplam.toFixed(2) + ' ₺'}</td>
-                </tr>
+                    <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.3); padding: 10px 14px; border-radius: 8px; border-top: 1px solid rgba(255,255,255,0.05);">
+                        <div>
+                            <span style="font-size: 0.88rem; color: #cbd5e1;">Fiş Paketi Tutarı:</span>
+                            <strong style="font-size: 1.15rem; color: #fff; margin-left: 6px;">${batchTotal.toFixed(2)} ₺</strong>
+                        </div>
+                        ${!isPaid ? `
+                            <button type="button" class="btn-add" style="padding: 7px 16px; font-size: 0.85rem; font-weight: 800; background: linear-gradient(135deg, #10b981, #059669); box-shadow: 0 4px 12px rgba(16,185,129,0.35);" onclick="paySingleSiparisBatch(${o.id}, ${batchTotal})">
+                                💵 Bu Fiş Paketini Tahsil Et (${batchTotal.toFixed(2)} ₺)
+                            </button>
+                        ` : ''}
+                    </div>
+                </div>
             `;
         });
-        if (tbody) tbody.innerHTML = html;
+
+        if (metaEl) {
+            metaEl.innerHTML = `
+                <span>Kalem Sayısı: <strong>${currentTableItems.length} Ürün</strong></span> | 
+                <span>Sipariş Sayısı: <strong>${masaOrders.length} Fiş Paketi</strong></span>
+            `;
+        }
+
+        if (tbody) tbody.innerHTML = batchesHtml;
     }
 
     updateFinancialSummary(subtotal);

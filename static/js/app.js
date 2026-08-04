@@ -158,11 +158,16 @@ function showSecurityError(msg) {
 
 document.addEventListener('DOMContentLoaded', async () => {
     const urlParams = new URLSearchParams(window.location.search);
-    const masaParam = urlParams.get('masa') || '1';
+    let masaParam = urlParams.get('masa') || '1';
     const tokenParam = urlParams.get('token');
 
+    // 192.168.1.100:8000 ile bağlanan kullanıcılar masa 1 butonuna tıkladığında veya masa 1 açıldığında dev masası (99) açılsın
+    if ((window.location.hostname === '192.168.1.100' || window.location.host === '192.168.1.100:8000') && masaParam === '1' && !tokenParam) {
+        masaParam = '99';
+    }
+
     state.masaId = parseInt(masaParam);
-    state.masaNo = `Masa ${state.masaId}`; // Fallback
+    state.masaNo = state.masaId === 99 ? 'Developer Masası' : `Masa ${state.masaId}`; // Fallback
 
     // --- DİNAMİK QR GÜVENLİK KONTROLÜ ---
     if (state.masaId !== 99) {

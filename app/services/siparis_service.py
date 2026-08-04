@@ -171,9 +171,9 @@ class SiparisService:
             if not s_info:
                 raise HTTPException(status_code=404, detail="Sipariş bulunamadı!")
 
-            if yeni_durum == "nakit_tahsil_edildi":
-                self.siparis_repo.update_odeme_and_durum(siparis_id, "odendi", "odendi_mutfakta", garson_adi)
-                yeni_durum = "odendi_mutfakta"
+            if yeni_durum in ["nakit_tahsil_edildi", "odendi_kapatildi"]:
+                self.siparis_repo.update_odeme_and_durum(siparis_id, "odendi", "teslim_edildi", garson_adi)
+                yeni_durum = "teslim_edildi"
             else:
                 self.siparis_repo.update_durum(siparis_id, yeni_durum, garson_adi if yeni_durum in ['garson_onayladi_mutfakta', 'teslim_edildi'] else None)
 
