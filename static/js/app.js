@@ -214,6 +214,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadCategories();
     loadProducts();
     checkActiveOrder(); // F5 RECOVERY: Sayfa yenilendiğinde aktif siparişi getirir!
+    initCategoryScrollNavigation(); // Kategori otomatik kaydırma geçişi
 
     // Socket.io Canlı Dinleyici (Otomatik Reconnection Ayarları)
     socket = io({
@@ -271,6 +272,89 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 });
 
+// AKICI VE KESİNTİSİZ NATIVE KATEGORİ KAYDIRMA SİSTEMİ (INTERSECTION OBSERVER)
+let categoryObserver = null;
+
+function initCategoryIntersectionObserver() {
+    const section = document.querySelector('.menu-products-section');
+    if (!section) return;
+
+    if (categoryObserver) {
+        categoryObserver.disconnect();
+    }
+
+    const options = {
+        root: section,
+        rootMargin: '-10% 0px -65% 0px',
+        threshold: 0
+    };
+
+    categoryObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                const catIdAttr = entry.target.getAttribute('data-cat-id');
+                const catId = (catIdAttr && catIdAttr !== 'other') ? parseInt(catIdAttr) : null;
+                if (state.activeKategoriId !== catId) {
+                    state.activeKategoriId = catId;
+                    updateSidebarActiveStateOnly();
+                }
+            }
+        });
+    }, options);
+
+    const sections = section.querySelectorAll('.category-section');
+    sections.forEach(s => categoryObserver.observe(s));
+}
+
+function updateSidebarActiveStateOnly() {
+    const container = document.getElementById('categoryGridBar');
+    if (!container) return;
+
+    const cards = container.querySelectorAll('.category-card-box');
+    cards.forEach(card => {
+        const onclickAttr = card.getAttribute('onclick') || '';
+        if (state.activeKategoriId === null && onclickAttr.includes('null')) {
+            card.classList.add('active');
+            card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } else if (state.activeKategoriId !== null && onclickAttr.includes(`selectCategory(${state.activeKategoriId})`)) {
+            card.classList.add('active');
+            card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } else {
+            card.classList.remove('active');
+        }
+    });
+
+    updateCategoryHeaderTitle(state.activeKategoriId);
+}
+
+function selectCategory(catId) {
+    state.activeKategoriId = catId;
+    updateSidebarActiveStateOnly();
+
+    const section = document.querySelector('.menu-products-section');
+    if (!section) return;
+
+    if (catId === null) {
+        section.scrollTo({ top: 0, behavior: 'smooth' });
+    } else {
+        const targetSec = document.getElementById(`cat-section-${catId}`);
+        if (targetSec) {
+            targetSec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    }
+}
+
+function updateCategoryHeaderTitle(catId) {
+    const titleEl = document.getElementById('activeCategoryTitle');
+    if (!titleEl) return;
+    if (catId === null) {
+        titleEl.innerText = "Tümü";
+    } else {
+        const cat = state.kategoriler.find(c => c.id === catId);
+        titleEl.innerText = cat ? cat.kategori_adi : "Tümü";
+    }
+}
+
 // F5 İLE SAYFA YENİLENDİĞİNDE MÜŞTERİNİN AKTİF SİPARİŞİNİ KURTARAN FONKSİYON
 async function checkActiveOrder() {
     try {
@@ -306,11 +390,9 @@ async function loadCategories() {
     }
 }
 
-async function loadProducts(kategoriId = null) {
+async function loadProducts() {
     try {
-        let url = '/api/urunler';
-        if (kategoriId) url += `?kategori_id=${kategoriId}`;
-        const res = await fetch(url);
+        const res = await fetch('/api/urunler');
         state.urunler = await res.json();
         renderProducts();
     } catch (e) {
@@ -348,78 +430,117 @@ function renderCategoryGrid() {
     container.innerHTML = html;
 }
 
-function selectCategory(catId) {
-    state.activeKategoriId = catId;
-    renderCategoryGrid();
-    updateCategoryHeaderTitle(catId);
-    loadProducts(catId);
-}
-
-function updateCategoryHeaderTitle(catId) {
-    const titleEl = document.getElementById('activeCategoryTitle');
-    if (!titleEl) return;
-    if (catId === null) {
-        titleEl.innerText = "Tümü";
-    } else {
-        const cat = state.kategoriler.find(c => c.id === catId);
-        titleEl.innerText = cat ? cat.kategori_adi : "Tümü";
-    }
-}
-
-// ÜRÜN KARTLARI (2 KOLONLU, SEÇİLİLER MAVİ PARLAYAN VE AÇIKLAMASIZ TASARIM)
+// ÜRÜN KARTLARI (KESİNTİSİZ TEK LİSTE, STICKY KATEGORİ BAŞLIKLI)
 function renderProducts() {
     const grid = document.getElementById('productGrid');
     if (!grid) return;
 
     if (state.urunler.length === 0) {
-        grid.innerHTML = `<div style="grid-column: 1/-1; text-align: center; color: var(--text-secondary); padding: 40px; background: rgba(255,255,255,0.02); border-radius: 16px; border: 1px dashed var(--border-color);">Bu kategoride henüz ürün bulunmuyor.</div>`;
+        grid.innerHTML = `<div style="text-align: center; color: var(--text-secondary); padding: 40px; background: rgba(255,255,255,0.02); border-radius: 16px; border: 1px dashed var(--border-color);">Bu kategoride henüz ürün bulunmuyor.</div>`;
         return;
     }
 
+    // Kategorilere göre ürünleri grupla
+    const grouped = {};
+    state.kategoriler.forEach(cat => {
+        grouped[cat.id] = {
+            category: cat,
+            products: []
+        };
+    });
+
+    const uncategorized = [];
+
+    state.urunler.forEach(prod => {
+        if (prod.kategori_id && grouped[prod.kategori_id]) {
+            grouped[prod.kategori_id].products.push(prod);
+        } else {
+            uncategorized.push(prod);
+        }
+    });
+
     let html = '';
-    const dummyRatings = ['4.9', '4.8', '5.0', '4.7', '4.9', '4.8'];
 
-    state.urunler.forEach((prod, index) => {
-        const catName = prod.kategori_adi ? prod.kategori_adi : '';
-        const icon = getCategoryIcon(catName);
-        const rating = dummyRatings[index % dummyRatings.length];
-        const hasImage = prod.gorsel_url && prod.gorsel_url.trim().length > 0;
+    state.kategoriler.forEach(cat => {
+        const group = grouped[cat.id];
+        if (!group || group.products.length === 0) return;
 
-        // Sepette bu üründen kaç tane var?
-        const cartItems = state.cart.filter(item => item.urun_id === prod.id);
-        const inCartQty = cartItems.reduce((sum, item) => sum + item.adet, 0);
-        const isSelected = inCartQty > 0;
+        const icon = getCategoryIcon(cat.kategori_adi);
+        html += `
+            <div class="category-section" id="cat-section-${cat.id}" data-cat-id="${cat.id}">
+                <div class="category-section-title">
+                    <h2>${icon} ${cat.kategori_adi}</h2>
+                </div>
+                <div class="category-products-list">
+        `;
+
+        group.products.forEach(prod => {
+            html += renderProductCardHTML(prod);
+        });
 
         html += `
-            <div class="product-card ${isSelected ? 'selected' : ''}" onclick="openProductNoteModal(${prod.id})">
-                <div class="product-card-image-box">
-                    ${hasImage
-                ? `<img src="${prod.gorsel_url}" alt="${prod.urun_adi}" class="product-card-img" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                           <div class="product-card-placeholder" style="display:none;"><span>${icon}</span></div>`
-                : `<div class="product-card-placeholder"><span>${icon}</span></div>`
-            }
-                    <div class="product-badge-price">₺${prod.fiyat.toFixed(0)}</div>
-                    <div class="product-badge-rating">★ ${rating}</div>
-                </div>
-                
-                <div class="product-card-body">
-                    <div class="product-title" title="${prod.urun_adi}">${prod.urun_adi}</div>
-                </div>
-
-                <div class="product-card-footer">
-                    <div class="product-price-bottom">₺${prod.fiyat.toFixed(0)}</div>
-                    <div class="product-card-footer-right">
-                        ${isSelected ? `<span class="product-cart-qty">${inCartQty}</span>` : ''}
-                        <button class="btn-add-circle ${isSelected ? 'active' : ''}" title="Sepete Ekle / Seç" onclick="event.stopPropagation(); openProductNoteModal(${prod.id})">
-                            <span>+</span>
-                        </button>
-                    </div>
                 </div>
             </div>
         `;
     });
 
+    if (uncategorized.length > 0) {
+        html += `
+            <div class="category-section" id="cat-section-other" data-cat-id="other">
+                <div class="category-section-title">
+                    <h2>🍴 Diğer Ürünler</h2>
+                </div>
+                <div class="category-products-list">
+        `;
+        uncategorized.forEach(prod => {
+            html += renderProductCardHTML(prod);
+        });
+        html += `
+                </div>
+            </div>
+        `;
+    }
+
     grid.innerHTML = html;
+    initCategoryIntersectionObserver();
+}
+
+function renderProductCardHTML(prod) {
+    const catName = prod.kategori_adi ? prod.kategori_adi : '';
+    const icon = getCategoryIcon(catName);
+    const hasImage = prod.gorsel_url && prod.gorsel_url.trim().length > 0;
+
+    const cartItems = state.cart.filter(item => item.urun_id === prod.id);
+    const inCartQty = cartItems.reduce((sum, item) => sum + item.adet, 0);
+    const isSelected = inCartQty > 0;
+
+    return `
+        <div class="product-card ${isSelected ? 'selected' : ''}" onclick="openProductNoteModal(${prod.id})">
+            <div class="product-card-image-box">
+                ${hasImage
+            ? `<img src="${prod.gorsel_url}" alt="${prod.urun_adi}" class="product-card-img" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                       <div class="product-card-placeholder" style="display:none;"><span>${icon}</span></div>`
+            : `<div class="product-card-placeholder"><span>${icon}</span></div>`
+        }
+            </div>
+
+            <div class="product-card-content">
+                <div class="product-title-row">
+                    <div class="product-title" title="${prod.urun_adi}">${prod.urun_adi}</div>
+                </div>
+
+                <div class="product-bottom-row">
+                    <div class="product-price-badge">₺${prod.fiyat.toFixed(0)}</div>
+                    <div class="product-actions-right">
+                        ${isSelected ? `<span class="product-cart-qty">${inCartQty} Adet</span>` : ''}
+                        <button class="btn-add-circle ${isSelected ? 'active' : ''}" title="Sepete Ekle / Seç" onclick="event.stopPropagation(); openProductNoteModal(${prod.id})">
+                            <span>${isSelected ? '✓' : '+'}</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
 }
 
 // ÜRÜN MODALİ
