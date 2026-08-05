@@ -254,6 +254,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     socket.on('durum_guncellendi', (data) => {
+        if (data && data.from_masa_id && parseInt(data.from_masa_id) === parseInt(state.masaId)) {
+            checkActiveOrder();
+            return;
+        }
         if (data && data.is_move) return;
         if (data && data.masa_id === state.masaId) {
             if (data.yeni_durum === 'bos') {
@@ -416,6 +420,25 @@ async function checkActiveOrder() {
     try {
         const res = await fetch(`/api/masalar/${state.masaId}/aktif-siparis`);
         const data = await res.json();
+
+        if (data.redirect_masa_id && parseInt(data.redirect_masa_id) !== parseInt(state.masaId)) {
+            state.masaId = parseInt(data.redirect_masa_id);
+            state.masaNo = data.redirect_masa_no || `Masa ${data.redirect_masa_id}`;
+
+            const url = new URL(window.location.href);
+            url.searchParams.set('masa', state.masaId);
+            window.history.replaceState({}, '', url);
+
+            const masaBadge = document.getElementById('tableBadge');
+            if (masaBadge) {
+                const shortNo = formatShortMasaNo(state.masaNo);
+                masaBadge.innerHTML = `🪑 ${shortNo}`;
+                masaBadge.title = state.masaNo;
+            }
+
+            showToast(`Adisyonunuz ${state.masaNo} masasına taşındı.`);
+        }
+
         if (data.has_active && (data.siparisler && data.siparisler.length > 0 || data.siparis)) {
             state.activeOrders = data.siparisler || [data.siparis];
             state.currentOrder = data.siparis || state.activeOrders[state.activeOrders.length - 1];

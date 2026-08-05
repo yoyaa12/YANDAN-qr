@@ -167,16 +167,31 @@ class SiparisService:
         return [self._map_to_siparis_response(s) for s in siparisler]
 
     def get_masa_aktif_siparis(self, masa_id: int):
-        siparisler = self.siparis_repo.get_all_active_by_masa_id(masa_id)
+        target_masa_id = masa_id
+        is_redirected = False
+
+        if masa_id in TABLE_MOVES_MAP:
+            moved_to = TABLE_MOVES_MAP[masa_id]
+            target_table = self.masa_repo.get_by_id(moved_to)
+            if target_table and target_table.get("durum") != "bos":
+                target_masa_id = moved_to
+                is_redirected = True
+
+        siparisler = self.siparis_repo.get_all_active_by_masa_id(target_masa_id)
         if siparisler:
             s_dtos = [self._map_to_siparis_response(s) for s in siparisler]
             genel_toplam = sum(s.toplam_tutar for s in s_dtos if s.toplam_tutar)
-            return {
+            res = {
                 "has_active": True,
                 "siparisler": [s.model_dump() for s in s_dtos],
                 "siparis": s_dtos[-1].model_dump(),
                 "genel_toplam": genel_toplam
             }
+            if is_redirected:
+                t_table = self.masa_repo.get_by_id(target_masa_id)
+                res["redirect_masa_id"] = target_masa_id
+                res["redirect_masa_no"] = t_table.get("masa_no", f"Masa {target_masa_id}") if t_table else f"Masa {target_masa_id}"
+            return res
         return {"has_active": False, "siparisler": [], "siparis": None, "genel_toplam": 0.0}
 
     async def update_siparis_durumu(self, siparis_id: int, data: DurumGuncelleModel) -> SiparisDurumResponse:
