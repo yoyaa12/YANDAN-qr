@@ -370,16 +370,27 @@ function updateCategoryHeaderTitle(catId) {
     }
 }
 
-// F5 İLE SAYFA YENİLENDİĞİNDE MÜŞTERİNİN AKTİF SİPARİŞİNİ KURTARAN FONKSİYON
+let isTrackingCollapsed = false;
+
+function toggleTrackingUI() {
+    isTrackingCollapsed = !isTrackingCollapsed;
+    renderOrderTrackingUI();
+}
+
+// SAYFA YENİLENDİĞİNDE VEYA SEKME DEĞİŞTİĞİNDE MÜŞTERİNİN TÜM AKTİF SİPARİŞLERİNİ GETİREN FONKSİYON
 async function checkActiveOrder() {
     try {
         const res = await fetch(`/api/masalar/${state.masaId}/aktif-siparis`);
         const data = await res.json();
-        if (data.has_active && data.siparis) {
-            state.currentOrder = data.siparis;
+        if (data.has_active && (data.siparisler && data.siparisler.length > 0 || data.siparis)) {
+            state.activeOrders = data.siparisler || [data.siparis];
+            state.currentOrder = data.siparis || state.activeOrders[state.activeOrders.length - 1];
+            state.genelToplam = data.genel_toplam || state.activeOrders.reduce((sum, o) => sum + (o.toplam_tutar || 0), 0);
             renderOrderTrackingUI();
         } else {
+            state.activeOrders = [];
             state.currentOrder = null;
+            state.genelToplam = 0;
             const container = document.getElementById('orderTrackingContainer');
             if (container) container.style.display = 'none';
         }
@@ -1208,117 +1219,167 @@ async function executeOrderSubmit(odemeYontemi) {
     }
 }
 
+function formatOrderTime(val) {
+    if (!val) return '';
+    if (typeof val === 'string') {
+        const trimmed = val.trim();
+        if (trimmed.length <= 8 && trimmed.includes(':')) {
+            const parts = trimmed.split(':');
+            return `${parts[0]}:${parts[1]}`;
+        }
+        const d = new Date(trimmed.replace(' ', 'T'));
+        if (!isNaN(d.getTime())) {
+            return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+        return trimmed;
+    }
+    return '';
+}
+
 // CANLI SİPARİŞ TAKİP EKRANI (F5 İLE KANANMAZ + SİPARİŞ VERİLEN ÜRÜNLERİN LİSTESİ)
 function renderOrderTrackingUI() {
     const container = document.getElementById('orderTrackingContainer');
-    if (!container || !state.currentOrder) return;
+    if (!container) return;
 
-    const status = state.currentOrder.siparis_durumu;
+    const orders = state.activeOrders && state.activeOrders.length > 0 ? state.activeOrders : (state.currentOrder ? [state.currentOrder] : []);
+    if (orders.length === 0) {
+        container.style.display = 'none';
+        return;
+    }
 
     container.style.display = 'block';
 
-    // Teslim edildi durumu
-    if (status === 'teslim_edildi') {
+    const latestOrder = orders[orders.length - 1];
+    const status = latestOrder.siparis_durumu;
+    const totalAdisyon = state.genelToplam || orders.reduce((acc, o) => acc + (o.toplam_tutar || 0), 0);
+
+    const chevronDownSVG = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle;"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
+    const chevronUpSVG = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle;"><polyline points="18 15 12 9 6 15"></polyline></svg>`;
+
+    // KAPANABİLİR / AÇILABİLİR KART KONTROLÜ (KAPALI HALDE)
+    if (isTrackingCollapsed) {
         container.innerHTML = `
-            <div class="tracking-card" style="border-color: var(--success); background: rgba(16, 185, 129, 0.1);">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
-                    <h3 style="font-size: 1.15rem; color: var(--success);">🎉 Masanıza Teslim Edildi</h3>
-                    <button style="background:none; color:var(--text-secondary); font-size:0.85rem; cursor:pointer;" onclick="dismissTrackingUI()">Kapat ✖</button>
+            <div class="tracking-card" style="padding: 10px 14px; cursor: pointer; border-radius: 14px;" onclick="toggleTrackingUI()">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div style="display:flex; align-items:center; gap: 8px;">
+                        <span style="font-size: 1.1rem;">📋</span>
+                        <span style="font-size: 0.92rem; font-weight: 700; color: var(--text-primary);">
+                            Adisyon (${orders.length} Sipariş • ${totalAdisyon.toFixed(2)} ₺)
+                        </span>
+                    </div>
+                    <span>${chevronDownSVG}</span>
                 </div>
-                <div style="font-size: 0.88rem; color: var(--text-secondary);">Afiyet olsun! Bizi tercih ettiğiniz için teşekkür ederiz.</div>
             </div>
         `;
         return;
     }
 
+    // TEK BİR NET DURUM BAŞLIĞI
     let currentStatusHTML = '';
 
     if (status === 'garson_onayi_bekliyor') {
         currentStatusHTML = `
-            <div class="single-status-banner active-step-received" style="border-color: #3b82f6; background: rgba(59, 130, 246, 0.15);">
-                <div class="status-icon-large">🛎️</div>
+            <div class="single-status-banner active-step-received" style="border-color: #3b82f6; background: rgba(59, 130, 246, 0.15); padding: 10px 14px; align-items: center; border-radius: 12px;">
+                <div class="status-icon-large" style="font-size: 1.4rem;">🛎️</div>
                 <div class="status-info">
-                    <div class="status-title-main" style="color:#3b82f6;">Garson Onayı Bekleniyor</div>
-                    <div class="status-sub-desc">Garsonumuz siparişi fiziken teyit etmek üzere masanıza geliyor. Ödemeyi yemeğin sonunda KASADA yapabilirsiniz.</div>
+                    <div class="status-title-main" style="color:#3b82f6; font-size: 1.05rem; font-weight: 700;">Garson Onayı Bekleniyor</div>
                 </div>
             </div>
         `;
     } else if (status === 'odendi_mutfakta' || status === 'garson_onayladi_mutfakta') {
         currentStatusHTML = `
-            <div class="single-status-banner active-step-received">
-                <div class="status-icon-large">✅</div>
+            <div class="single-status-banner active-step-received" style="padding: 10px 14px; align-items: center; border-radius: 12px;">
+                <div class="status-icon-large" style="font-size: 1.4rem;">✅</div>
                 <div class="status-info">
-                    <div class="status-title-main">Siparişiniz Alındı</div>
-                    <div class="status-sub-desc">Siparişiniz doğrulandı • Şeflerimiz siparişinizi hazırlamaya başladı! 👨‍🍳</div>
+                    <div class="status-title-main" style="font-size: 1.05rem; font-weight: 700;">Siparişiniz Alındı</div>
                 </div>
             </div>
         `;
     } else if (status === 'hazirlaniyor') {
         currentStatusHTML = `
-            <div class="single-status-banner active-step-preparing">
-                <div class="status-icon-large">👨‍🍳</div>
+            <div class="single-status-banner active-step-preparing" style="padding: 10px 14px; align-items: center; border-radius: 12px;">
+                <div class="status-icon-large" style="font-size: 1.4rem;">👨‍🍳</div>
                 <div class="status-info">
-                    <div class="status-title-main">Mutfakta Hazırlanıyor</div>
-                    <div class="status-sub-desc">Tahmini Hazırlanma Süresi: <strong style="color:#fbbf24;">~12 - 15 dk</strong></div>
+                    <div class="status-title-main" style="font-size: 1.05rem; font-weight: 700;">Mutfakta Hazırlanıyor</div>
                 </div>
             </div>
         `;
     } else if (status === 'hazir') {
         currentStatusHTML = `
-            <div class="single-status-banner active-step-ready">
-                <div class="status-icon-large">🔔</div>
+            <div class="single-status-banner active-step-ready" style="padding: 10px 14px; align-items: center; border-radius: 12px;">
+                <div class="status-icon-large" style="font-size: 1.4rem;">🔔</div>
                 <div class="status-info">
-                    <div class="status-title-main">Siparişiniz Hazır!</div>
-                    <div class="status-sub-desc">Garson yemeğinizi masanıza getirmek üzere yola çıktı.</div>
+                    <div class="status-title-main" style="font-size: 1.05rem; font-weight: 700;">Siparişiniz Hazır!</div>
+                </div>
+            </div>
+        `;
+    } else if (status === 'teslim_edildi') {
+        currentStatusHTML = `
+            <div class="single-status-banner active-step-ready" style="border-color: var(--success); background: rgba(16, 185, 129, 0.15); padding: 10px 14px; align-items: center; border-radius: 12px;">
+                <div class="status-icon-large" style="font-size: 1.4rem;">🎉</div>
+                <div class="status-info">
+                    <div class="status-title-main" style="color: var(--success); font-size: 1.05rem; font-weight: 700;">Masanıza Teslim Edildi</div>
                 </div>
             </div>
         `;
     }
 
-    // ÜRÜN DETAYLARI LİSTESİ
-    let detailsHTML = '';
-    const detaylar = state.currentOrder.detaylar || [];
-    detaylar.forEach(item => {
-        detailsHTML += `
-            <div class="order-item-row" style="padding: 6px 0;">
-                <div class="order-item-main" style="font-size: 0.95rem;">
+    // TÜM SİPARİŞLERİN (ADİSYONUN) LİSTESİ
+    let ordersListHTML = '';
+
+    orders.forEach((ord, index) => {
+        const orderTime = formatOrderTime(ord.olusturma_tarihi);
+
+        const isPaid = ord.odeme_durumu === 'odendi';
+        const paymentBadge = isPaid
+            ? `<span style="background: rgba(16, 185, 129, 0.15); border: 1px solid #10b981; color: #10b981; font-weight: 800; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem;">Ödendi</span>`
+            : `<span style="background: rgba(245, 158, 11, 0.15); border: 1px solid #f59e0b; color: #f59e0b; font-weight: 800; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem;">Ödeme Kasada Yapılacak</span>`;
+
+        let itemsHTML = '';
+        const detaylar = ord.detaylar || [];
+        detaylar.forEach(item => {
+            itemsHTML += `
+                <div style="display: flex; justify-content: space-between; font-size: 0.88rem; color: var(--text-primary); padding: 2px 0;">
                     <span>${item.adet}x ${item.urun_adi}</span>
                     <span>${(item.ara_toplam || (item.adet * item.birim_fiyat)).toFixed(2)} ₺</span>
                 </div>
-                ${item.urun_notu ? `<div class="order-item-note" style="font-size: 0.78rem;">${item.urun_notu}</div>` : ''}
+            `;
+        });
+
+        ordersListHTML += `
+            <div style="padding: 8px 0; ${index > 0 ? 'border-top: 1px dashed rgba(255,255,255,0.1);' : ''}">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                    <span style="font-size: 0.78rem; color: var(--text-secondary); font-weight: 600;">
+                        Sipariş ${index + 1} ${orderTime ? `• ${orderTime}` : ''}
+                    </span>
+                    ${paymentBadge}
+                </div>
+                ${itemsHTML}
             </div>
         `;
     });
 
-    const isPaid = state.currentOrder.odeme_durumu === 'odendi';
-    const paymentBadge = isPaid
-        ? `<span class="table-badge" style="background: var(--success); font-weight:800;">💳 Ödendi</span>`
-        : `<span class="table-badge" style="background: #f59e0b; color:#fff; font-weight:800;">🟡 ÖDEME KASADA YAPILACAK</span>`;
-
     let html = `
-        <div class="tracking-card">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
-                <span style="font-size: 0.8rem; font-weight:800; color: var(--primary); letter-spacing: 0.5px;">🚀 CANLI SİPARİŞ DURUMU</span>
-                <span class="table-badge">🪑 ${state.masaNo}</span>
-            </div>
-            
+        <div class="tracking-card" style="padding-bottom: 8px;">
             ${currentStatusHTML}
 
-            <!-- VERİLEN SİPARİŞİN İÇERİĞİ -->
-            <div style="margin-top: 16px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 14px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px; border-bottom: 1px dashed rgba(255,255,255,0.1); padding-bottom: 8px;">
-                    <span style="font-size: 0.88rem; font-weight: 700; color: var(--text-primary);">📋 Sipariş Ettiğiniz Ürünler:</span>
-                    ${paymentBadge}
-                </div>
-                
-                <div style="max-height: 200px; overflow-y: auto;">
-                    ${detailsHTML}
+            <!-- MASANIN TÜM ADİSYON DÖKÜMÜ -->
+            <div style="margin-top: 12px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px;">
+                <div>
+                    ${ordersListHTML}
                 </div>
 
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 8px; font-weight: 800;">
-                    <span>Toplam Tutar:</span>
-                    <span style="color: #fbbf24; font-size: 1.15rem;">${(state.currentOrder.toplam_tutar || 0).toFixed(2)} ₺</span>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.12); padding-top: 10px; font-weight: 800;">
+                    <span style="font-size: 0.95rem;">Genel Adisyon Toplamı:</span>
+                    <span style="color: #10b981; font-size: 1.15rem;">${totalAdisyon.toFixed(2)} ₺</span>
                 </div>
+            </div>
+
+            <!-- KUTUCUKLARIN SAĞ ALTTAKİ KAPANIR OK BUTONU -->
+            <div style="display: flex; justify-content: flex-end; padding-top: 6px;">
+                <span onclick="toggleTrackingUI()" style="cursor: pointer; padding: 4px;" title="Adisyonu Gizle">
+                    ${chevronUpSVG}
+                </span>
             </div>
         </div>
     `;

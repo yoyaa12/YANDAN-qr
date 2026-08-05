@@ -54,6 +54,16 @@ class SiparisRepository:
         """
         return self.db.execute_query(query, (masa_id,), fetch_one=True)
 
+    def get_all_active_by_masa_id(self, masa_id: int):
+        query = """
+            SELECT s.*, m.masa_no 
+            FROM Siparisler s 
+            JOIN Masalar m ON s.masa_id = m.id 
+            WHERE s.masa_id = ? AND m.durum != 'bos' AND s.siparis_durumu != 'iptal'
+            ORDER BY s.id ASC
+        """
+        return self.db.execute_query(query, (masa_id,)) or []
+
     def update_durum(self, siparis_id: int, yeni_durum: str, garson_adi: Optional[str] = None):
         if garson_adi:
             self.db.execute_non_query(

@@ -155,11 +155,17 @@ class SiparisService:
         return [self._map_to_siparis_response(s) for s in siparisler]
 
     def get_masa_aktif_siparis(self, masa_id: int):
-        siparis = self.siparis_repo.get_active_by_masa_id(masa_id)
-        if siparis:
-            s_dto = self._map_to_siparis_response(siparis)
-            return {"has_active": True, "siparis": s_dto}
-        return {"has_active": False, "siparis": None}
+        siparisler = self.siparis_repo.get_all_active_by_masa_id(masa_id)
+        if siparisler:
+            s_dtos = [self._map_to_siparis_response(s) for s in siparisler]
+            genel_toplam = sum(s.toplam_tutar for s in s_dtos if s.toplam_tutar)
+            return {
+                "has_active": True,
+                "siparisler": [s.model_dump() for s in s_dtos],
+                "siparis": s_dtos[-1].model_dump(),
+                "genel_toplam": genel_toplam
+            }
+        return {"has_active": False, "siparisler": [], "siparis": None, "genel_toplam": 0.0}
 
     async def update_siparis_durumu(self, siparis_id: int, data: DurumGuncelleModel) -> SiparisDurumResponse:
         yeni_durum = data.yeni_durum.lower()
