@@ -15,3 +15,7 @@ Bu dosya, yapay zekanın bu projede ve gelecek geliştirmelerde uyması gereken 
 * Arayüzler yavaş/kasan ağır tasarımlar yerine son derece hafif, akıcı, hızlı tepki veren (lightweight) yapıda olacaktır.
 * Resimler ve görseller WebP formatında ve mobil ekranlara uygun boyutlandırılmış olarak yüklenecektir.
 * DOM güncellemelerinde tüm listeyi sıfırdan re-render etmek (`innerHTML` sıfırlaması) yerine sadece değişen elemanlar güncellenecektir.
+
+### 3. Veritabanı ve SQL Kuralları (Zorunlu)
+* **Kod İçine SQL Tablo/Migrasyon Yazma YASAĞI:** Projenin Python / Backend kodları içerisinde doğrudan SQL tablo oluşturma, şema değiştirme veya DDL/DML migrasyon sorguları yazılmayacaktır.
+* **Kullanıcı Onayı ve SQL İletimi:** Veritabanında yapılması gereken sorgular açıklanıp SQL metni olarak kullanıcıya verilecek, onay alınmadan ve kullanıcı çalıştırmadan veritabanı kodu projeye gömülmeyecektir.

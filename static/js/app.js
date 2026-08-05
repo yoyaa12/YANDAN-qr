@@ -337,10 +337,7 @@ function updateSidebarActiveStateOnly() {
     const cards = container.querySelectorAll('.category-card-box');
     cards.forEach(card => {
         const onclickAttr = card.getAttribute('onclick') || '';
-        if (state.activeKategoriId === null && onclickAttr.includes('null')) {
-            card.classList.add('active');
-            card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        } else if (state.activeKategoriId !== null && onclickAttr.includes(`selectCategory(${state.activeKategoriId})`)) {
+        if (state.activeKategoriId !== null && onclickAttr.includes(`selectCategory(${state.activeKategoriId})`)) {
             card.classList.add('active');
             card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         } else {
@@ -352,30 +349,24 @@ function updateSidebarActiveStateOnly() {
 }
 
 function selectCategory(catId) {
+    if (!catId) return;
     state.activeKategoriId = catId;
     updateSidebarActiveStateOnly();
 
-    const section = document.querySelector('.menu-products-section');
-    if (!section) return;
-
-    if (catId === null) {
-        section.scrollTo({ top: 0, behavior: 'smooth' });
-    } else {
-        const targetSec = document.getElementById(`cat-section-${catId}`);
-        if (targetSec) {
-            targetSec.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
+    const targetSec = document.getElementById(`cat-section-${catId}`);
+    if (targetSec) {
+        targetSec.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 }
 
 function updateCategoryHeaderTitle(catId) {
     const titleEl = document.getElementById('activeCategoryTitle');
     if (!titleEl) return;
-    if (catId === null) {
-        titleEl.innerText = "Tümü";
-    } else {
-        const cat = state.kategoriler.find(c => c.id === catId);
-        titleEl.innerText = cat ? cat.kategori_adi : "Tümü";
+    const cat = state.kategoriler.find(c => c.id === catId);
+    if (cat) {
+        titleEl.innerText = cat.kategori_adi;
+    } else if (state.kategoriler.length > 0) {
+        titleEl.innerText = state.kategoriler[0].kategori_adi;
     }
 }
 
@@ -408,6 +399,9 @@ async function loadCategories() {
     try {
         const res = await fetch('/api/kategoriler');
         state.kategoriler = await res.json();
+        if (state.kategoriler.length > 0 && !state.activeKategoriId) {
+            state.activeKategoriId = state.kategoriler[0].id;
+        }
         renderCategoryGrid();
     } catch (e) {
         console.error("Kategoriler yüklenemedi:", e);
@@ -429,12 +423,11 @@ function renderCategoryGrid() {
     const container = document.getElementById('categoryGridBar');
     if (!container) return;
 
-    let html = `
-        <div class="category-card-box ${state.activeKategoriId === null ? 'active' : ''}" onclick="selectCategory(null)">
-            <span class="category-card-icon">🍽️</span>
-            <span class="category-card-title">Tümü</span>
-        </div>
-    `;
+    if (state.kategoriler.length > 0 && !state.activeKategoriId) {
+        state.activeKategoriId = state.kategoriler[0].id;
+    }
+
+    let html = '';
 
     state.kategoriler.forEach(cat => {
         const icon = getCategoryIcon(cat.kategori_adi);
