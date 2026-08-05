@@ -156,6 +156,25 @@ function showSecurityError(msg) {
     if (cartDock) cartDock.style.display = 'none';
 }
 
+function formatShortMasaNo(masaNo) {
+    if (!masaNo) return 'M-1';
+    let str = masaNo.trim();
+    if (str.toLowerCase().includes('developer')) return 'DEV';
+
+    const parts = str.split(/\s+/);
+    if (parts.length >= 2) {
+        const firstChar = parts[0].charAt(0).toUpperCase();
+        const number = parts[parts.length - 1];
+        if (/^\d+$/.test(number)) {
+            return `${firstChar}-${number}`;
+        }
+    }
+    if (str.toLowerCase().startsWith('masa ')) {
+        return 'M-' + str.substring(5).trim();
+    }
+    return str;
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
     const urlParams = new URLSearchParams(window.location.search);
     let masaParam = urlParams.get('masa') || '1';
@@ -197,6 +216,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
         const mRes = await fetch('/api/masalar');
         const mData = await mRes.json();
+
         const gercekMasa = mData.find(m => m.id === state.masaId);
         if (gercekMasa) {
             state.masaNo = gercekMasa.masa_no;
@@ -204,7 +224,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (e) { console.error(e); }
 
     const tableBadge = document.getElementById('tableBadge');
-    if (tableBadge) tableBadge.innerHTML = `🪑 ${state.masaNo}`;
+    if (tableBadge) {
+        const shortNo = formatShortMasaNo(state.masaNo);
+        tableBadge.innerHTML = `🪑 ${shortNo}`;
+        tableBadge.title = state.masaNo;
+    }
 
     // Dil seçimi yapılmamışsa aç
     if (!state.language) {
@@ -530,18 +554,78 @@ function renderProductCardHTML(prod) {
                 </div>
 
                 <div class="product-bottom-row">
-                    <div class="product-price-badge">₺${prod.fiyat.toFixed(0)}</div>
+                    <div class="product-price-badge">${prod.fiyat.toFixed(0)} ₺</div>
                     <div class="product-actions-right">
-                        ${isSelected ? `<span class="product-cart-qty">${inCartQty} Adet</span>` : ''}
-                        <button class="btn-add-circle ${isSelected ? 'active' : ''}" title="Sepete Ekle / Seç" onclick="event.stopPropagation(); openProductNoteModal(${prod.id})">
-                            <span>${isSelected ? '✓' : '+'}</span>
-                        </button>
+                        ${isSelected ? `
+                            <div class="quantity-counter-box" onclick="event.stopPropagation();">
+                                <button class="btn-qty-step" title="Adet Azalt" onclick="quickAddToCart(event, ${prod.id}, -1)"><span>-</span></button>
+                                <span class="product-cart-qty-badge">${inCartQty}</span>
+                                <button class="btn-qty-step" title="Adet Artır" onclick="quickAddToCart(event, ${prod.id}, 1)"><span>+</span></button>
+                            </div>
+                        ` : `
+                            <button class="btn-add-circle" title="Sepete Ekle" onclick="quickAddToCart(event, ${prod.id}, 1)">
+                                <span>+</span>
+                            </button>
+                        `}
                     </div>
                 </div>
             </div>
         </div>
     `;
 }
+
+function quickAddToCart(event, productId, delta = 1) {
+    if (event) event.stopPropagation();
+
+    const prod = state.urunler.find(p => p.id === productId);
+    if (!prod) return;
+
+    const catName = (prod.kategori_adi || '').toLowerCase();
+    const prodName = (prod.urun_adi || '').toLowerCase();
+    const isPizza = prodName.includes('pizza') || catName.includes('pizza');
+
+    const cartItems = state.cart.filter(item => item.urun_id === productId);
+
+    if (delta > 0) {
+        if (cartItems.length > 0) {
+            const lastItem = cartItems[cartItems.length - 1];
+            lastItem.adet += 1;
+            lastItem.ara_toplam = lastItem.birim_fiyat * lastItem.adet;
+            notifyCartUpdateToSocket();
+            updateCartUI();
+            playNotificationSound();
+        } else if (isPizza) {
+            openProductNoteModal(productId);
+        } else {
+            state.cart.push({
+                id: Date.now(),
+                urun_id: prod.id,
+                urun_adi: prod.urun_adi,
+                birim_fiyat: prod.fiyat,
+                adet: 1,
+                urun_notu: '',
+                ara_toplam: prod.fiyat
+            });
+            notifyCartUpdateToSocket();
+            updateCartUI();
+            playNotificationSound();
+        }
+    } else if (delta < 0) {
+        if (cartItems.length > 0) {
+            const lastItem = cartItems[cartItems.length - 1];
+            lastItem.adet -= 1;
+            if (lastItem.adet <= 0) {
+                const idx = state.cart.findIndex(i => i.id === lastItem.id);
+                if (idx > -1) state.cart.splice(idx, 1);
+            } else {
+                lastItem.ara_toplam = lastItem.birim_fiyat * lastItem.adet;
+            }
+            notifyCartUpdateToSocket();
+            updateCartUI();
+        }
+    }
+}
+window.quickAddToCart = quickAddToCart;
 
 // ÜRÜN MODALİ
 function openProductNoteModal(productId) {
@@ -881,7 +965,6 @@ function confirmAddToCart() {
     closeModal('productModal');
     updateCartUI();
     playNotificationSound();
-    showToast(`${fullTitle} sepete eklendi!`);
 }
 
 function notifyCartUpdateToSocket() {
@@ -910,10 +993,16 @@ function updateCartUI() {
     if (cartPrice) cartPrice.innerText = `${totalPrice.toFixed(2)} ₺`;
 
     if (cartDock) {
-        cartDock.style.display = totalCount > 0 ? 'flex' : 'none';
+        const isShowing = totalCount > 0;
+        cartDock.style.display = isShowing ? 'flex' : 'none';
+
+        if (isShowing) {
+            cartDock.classList.remove('cart-dock-pop');
+            void cartDock.offsetWidth; // Reflow tetikle
+            cartDock.classList.add('cart-dock-pop');
+        }
     }
 
-    // Sepet değiştiğinde ürün kartlarındaki mavi neon seçili parlama ve adet rozetini güncelle
     renderProducts();
 }
 

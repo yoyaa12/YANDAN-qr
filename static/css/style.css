@@ -152,16 +152,17 @@ textarea:focus {
 }
 
 .table-badge {
-    background: linear-gradient(135deg, var(--primary), #d97706);
-    color: #fff;
-    padding: 6px 14px;
+    background: rgba(245, 158, 11, 0.15);
+    border: 1.5px solid var(--primary);
+    color: var(--primary);
+    padding: 5px 12px;
     border-radius: var(--radius-full);
     font-size: 0.85rem;
     font-weight: 800;
-    box-shadow: 0 4px 12px var(--primary-glow);
+    letter-spacing: 0.3px;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
     white-space: nowrap;
     flex-shrink: 0;
 }
@@ -380,6 +381,24 @@ textarea:focus {
     gap: 10px;
 }
 
+/* PORTAL GİRİŞ KARTLARI (LOCALHOST:8000 EKRANI İÇİN) */
+.portal-card {
+    background: rgba(15, 23, 42, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: 210px;
+    transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.portal-card:hover {
+    border-color: rgba(255, 255, 255, 0.2);
+    transform: translateY(-2px);
+}
+
 /* PRODUCT GRID & CARDS (HER SATIRDA 1 ÜRÜN & PERFORMANS ODAKLI TASARIM) */
 .product-grid {
     display: flex !important;
@@ -391,7 +410,8 @@ textarea:focus {
     background: rgba(15, 23, 42, 0.95);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 16px;
-    padding: 0; /* Sol, üst ve alt tam sıfır padding */
+    padding: 0;
+    /* Sol, üst ve alt tam sıfır padding */
     display: flex;
     align-items: stretch;
     position: relative;
@@ -415,7 +435,8 @@ textarea:focus {
 
 .product-card-image-box {
     position: relative;
-    width: 88px; /* Sol, üst ve alt kenara tam yapışık 88x88px büyük görsel */
+    width: 88px;
+    /* Sol, üst ve alt kenara tam yapışık 88x88px büyük görsel */
     height: 88px;
     border-top-left-radius: 15px;
     border-bottom-left-radius: 15px;
@@ -449,8 +470,9 @@ textarea:focus {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
-    padding: 10px 14px;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 14px;
 }
 
 .product-title-row {
@@ -458,10 +480,10 @@ textarea:focus {
 }
 
 .product-title {
-    font-size: 0.98rem;
+    font-size: 0.94rem;
     font-weight: 700;
     color: #f8fafc;
-    line-height: 1.3;
+    line-height: 1.25;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
@@ -477,20 +499,72 @@ textarea:focus {
     justify-content: space-between;
     gap: 8px;
     width: 100%;
-    margin-top: 4px;
 }
 
 .product-price-badge {
-    font-size: 1.15rem;
-    font-weight: 800;
-    color: #fbbf24;
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: #10b981;
+    letter-spacing: -0.2px;
     white-space: nowrap;
+    line-height: 1;
+    display: flex;
+    align-items: center;
 }
 
 .product-actions-right {
     display: flex;
     align-items: center;
     gap: 8px;
+}
+
+.quantity-counter-box {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(245, 158, 11, 0.15);
+    border: 1px solid var(--primary);
+    border-radius: 10px;
+    padding: 2px 4px;
+}
+
+.btn-qty-step {
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+    background: var(--primary);
+    border: none;
+    color: #000;
+    font-size: 1.1rem;
+    font-weight: 900;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    cursor: pointer;
+    transition: transform 0.1s ease, background-color 0.1s ease;
+}
+
+.btn-qty-step span {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    margin-top: -2px;
+}
+
+.btn-qty-step:active {
+    transform: scale(0.92);
+}
+
+.product-cart-qty-badge {
+    min-width: 22px;
+    text-align: center;
+    font-size: 0.9rem;
+    font-weight: 800;
+    color: #ffffff;
+    padding: 0 4px;
 }
 
 .product-cart-qty {
@@ -506,27 +580,37 @@ textarea:focus {
 
 .product-price-bottom {
     display: block !important;
-    font-size: 1.1rem;
-    font-weight: 800;
-    color: #fbbf24;
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: #10b981;
     white-space: nowrap;
     text-align: right;
 }
 
 .btn-add-circle {
-    width: 32px;
-    height: 32px;
-    border-radius: 9px;
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    color: #fff;
-    font-size: 1.1rem;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    background: rgba(245, 158, 11, 0.15);
+    border: 1px solid var(--primary);
+    color: var(--primary);
+    font-size: 1.3rem;
     font-weight: 800;
     display: flex;
     align-items: center;
     justify-content: center;
+    line-height: 1;
     cursor: pointer;
     transition: transform 0.15s ease, background-color 0.15s ease;
+}
+
+.btn-add-circle span {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    margin-top: -2px;
 }
 
 .btn-add-circle.active {
@@ -537,13 +621,14 @@ textarea:focus {
 }
 
 .btn-add-circle:hover {
-    transform: scale(1.05);
+    transform: scale(1.08);
 }
 
 .product-price {
-    font-size: 1.25rem;
-    font-weight: 800;
-    color: #fbbf24;
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: #10b981;
 }
 
 .btn-add {
@@ -673,7 +758,7 @@ textarea:focus {
     display: inline-block;
 }
 
-/* BOTTOM STICKY CART DOCK (EKRAN ALTI İLE ÇAKIŞMAYAN SABİT BAR) */
+/* BOTTOM STICKY CART DOCK (EKRAN ALTI İLE ÇAKIŞMAYAN SABİT BEYAZ BAR) */
 .cart-bottom-dock {
     position: fixed;
     bottom: 24px;
@@ -681,12 +766,12 @@ textarea:focus {
     transform: translateX(-50%);
     width: 90%;
     max-width: 400px;
-    background: rgba(15, 23, 42, 0.98);
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: #ffffff;
+    border: 1px solid rgba(0, 0, 0, 0.1);
     border-radius: 100px;
-    padding: 8px 10px;
+    padding: 8px 12px;
     z-index: 150;
-    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -696,7 +781,7 @@ textarea:focus {
     width: 100%;
     background: transparent;
     border: none;
-    color: #fff;
+    color: #0f172a;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -709,13 +794,32 @@ textarea:focus {
 }
 
 .cart-dock-price {
-    font-size: 1.15rem;
-    font-weight: 800;
-    color: #000;
+    font-size: 1.1rem;
+    font-weight: 900;
+    color: #000000;
     background: linear-gradient(135deg, var(--primary), #d97706);
     padding: 8px 18px;
     border-radius: 100px;
-    box-shadow: 0 4px 15px rgba(245, 158, 11, 0.5);
+    box-shadow: 0 4px 14px rgba(245, 158, 11, 0.4);
+}
+
+@keyframes cartDockPop {
+    0% {
+        transform: translateX(-50%) scale(0.92);
+    }
+    50% {
+        transform: translateX(-50%) scale(1.08);
+    }
+    75% {
+        transform: translateX(-50%) scale(1.02);
+    }
+    100% {
+        transform: translateX(-50%) scale(1);
+    }
+}
+
+.cart-dock-pop {
+    animation: cartDockPop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
 }
 
 .cart-count-badge {
@@ -2036,6 +2140,285 @@ textarea:focus {
     background: linear-gradient(135deg, #10b981, #047857);
     color: #fff;
     border-color: #10b981;
+}
+
+.btn-pos {
+    background: linear-gradient(135deg, #06b6d4, #0284c7);
+    color: #fff;
+    border-color: #06b6d4;
+}
+
+.btn-ticket {
+    background: linear-gradient(135deg, #8b5cf6, #6d28d9);
+    color: #fff;
+    border-color: #8b5cf6;
+}
+
+.btn-parcali {
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    color: #fff;
+    border-color: #f59e0b;
+}
+
+.btn-iskonto {
+    background: linear-gradient(135deg, #ec4899, #be185d);
+    color: #fff;
+    border-color: #ec4899;
+}
+
+.btn-ikram {
+    background: linear-gradient(135deg, #ef4444, #b91c1c);
+    color: #fff;
+    border-color: #ef4444;
+}
+
+.btn-tasi {
+    background: linear-gradient(135deg, #64748b, #334155);
+    color: #fff;
+    border-color: #64748b;
+}
+
+.btn-fis {
+    background: linear-gradient(135deg, #eab308, #ca8a04);
+    color: #000;
+    border-color: #eab308;
+}
+
+.shortcut-chip {
+    background: rgba(255, 255, 255, 0.08);
+    color: #cbd5e1;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.shortcut-chip:hover {
+    background: rgba(255, 255, 255, 0.18);
+    color: #fff;
+}
+
+/* KATEGORİ ARKA PLAN GÖRSELİ & TEMİZ ALT BAŞLIK HİZALAMASI */
+.category-card-box {
+    position: relative !important;
+    overflow: hidden !important;
+    justify-content: flex-end !important;
+    padding: 0 !important;
+    min-height: 84px !important;
+}
+
+.category-card-img {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover !important;
+    z-index: 1 !important;
+    transition: transform 0.3s ease, filter 0.3s ease !important;
+    filter: brightness(0.75) !important;
+    border-radius: 0 !important;
+    margin: 0 !important;
+}
+
+.category-card-box:hover .category-card-img {
+    transform: scale(1.12) !important;
+    filter: brightness(0.85) !important;
+}
+
+.category-card-box.active .category-card-img {
+    filter: brightness(0.9) !important;
+    transform: scale(1.05) !important;
+}
+
+.category-card-icon {
+    position: relative !important;
+    z-index: 2 !important;
+    margin-top: 12px !important;
+    margin-bottom: 4px !important;
+}
+
+.category-card-title {
+    position: relative !important;
+    z-index: 2 !important;
+    width: 100% !important;
+    font-size: 0.78rem !important;
+    font-weight: 800 !important;
+    color: #ffffff !important;
+    line-height: 1.2 !important;
+    word-break: break-word !important;
+    padding: 16px 4px 6px 4px !important;
+    background: linear-gradient(to top, rgba(11, 15, 25, 0.95) 0%, rgba(11, 15, 25, 0.65) 65%, transparent 100%) !important;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9) !important;
+}
+
+.category-card-box.active .category-card-title {
+    color: #06b6d4 !important;
+    font-weight: 900 !important;
+    text-shadow: 0 0 8px rgba(6, 182, 212, 0.8) !important;
+}
+
+/* ==========================================================================
+   KASA / POS EKRAAN KİLİTLEME & DÜZEN KAYMALARINI ÖNLEME STİLLERİ
+   ========================================================================== */
+html,
+body.vega-kasa-body {
+    height: 100vh !important;
+    max-height: 100vh !important;
+    width: 100vw !important;
+    max-width: 100vw !important;
+    overflow: hidden !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+}
+
+.vega-navbar {
+    flex-shrink: 0 !important;
+    height: 60px !important;
+    min-height: 60px !important;
+    max-height: 60px !important;
+}
+
+.vega-pos-container {
+    height: calc(100vh - 60px) !important;
+    max-height: calc(100vh - 60px) !important;
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+}
+
+/* ÖDEMEYİ AL BUTONU HOVER BÜYÜME KAYMASINI ENGELLEME */
+#btnMainOdemeyiAl:hover,
+.vega-ticket-section .btn-add:hover {
+    transform: none !important;
+    background: linear-gradient(135deg, #059669, #0284c7) !important;
+    box-shadow: 0 4px 20px rgba(16, 185, 129, 0.6) !important;
+}
+
+/* SAĞ DETAY PANELİ DİK ALAN HİZALAMASI & TAŞMA ENGELİ */
+.masa-detay-right {
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+}
+
+/* ==========================================================================
+   YAZDIRMA (PRINT / POS THERMAL PRINTER 80MM) MEDYA SORGULARI
+   ========================================================================== */
+@media print {
+    @page {
+        size: 80mm auto;
+        margin: 0mm !important;
+    }
+
+    html,
+    body {
+        width: 80mm !important;
+        max-width: 80mm !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: #ffffff !important;
+        color: #000000 !important;
+        box-sizing: border-box !important;
+    }
+
+    /* Sayfadaki tüm Web arayüz elemanlarını, butonları ve başlıkları gizle */
+    body * {
+        visibility: hidden !important;
+    }
+
+    .no-print,
+    .modal-close,
+    .navbar,
+    .btn-add,
+    .shortcut-chip,
+    button,
+    header,
+    main {
+        display: none !important;
+    }
+
+    /* Sadece fiş metni alanını ve çocuklarını görünür yap */
+    #printReceiptModal,
+    #printReceiptModal .modal-content,
+    #receiptPrintArea,
+    #receiptPrintArea * {
+        visibility: visible !important;
+    }
+
+    #printReceiptModal {
+        position: absolute !important;
+        left: 0 !important;
+        top: 0 !important;
+        width: 80mm !important;
+        max-width: 80mm !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: #ffffff !important;
+        box-shadow: none !important;
+        border: none !important;
+    }
+
+    #printReceiptModal .modal-content {
+        position: absolute !important;
+        left: 0 !important;
+        top: 0 !important;
+        width: 80mm !important;
+        max-width: 80mm !important;
+        margin: 0 !important;
+        padding: 3mm 4mm !important;
+        border: none !important;
+        box-shadow: none !important;
+        background: #ffffff !important;
+        color: #000000 !important;
+        box-sizing: border-box !important;
+    }
+
+    #receiptPrintArea {
+        width: 100% !important;
+        max-width: 100% !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        color: #000000 !important;
+        font-family: 'Courier New', Courier, monospace !important;
+        font-size: 11px !important;
+        line-height: 1.3 !important;
+    }
+}
+
+/* GÖRSEL MASA TAŞIMA MODU STİLLERİ */
+.move-mode-banner {
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(79, 70, 229, 0.35));
+    border: 1.5px solid #6366f1;
+    border-radius: 12px;
+    padding: 10px 16px;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    animation: movePulse 1.5s infinite alternate;
+}
+
+@keyframes movePulse {
+    from {
+        box-shadow: 0 0 8px rgba(99, 102, 241, 0.4);
+    }
+
+    to {
+        box-shadow: 0 0 20px rgba(99, 102, 241, 0.8);
+    }
+}
+
+.vega-table-card.source-selected {
+    border: 2px solid #38bdf8 !important;
+    box-shadow: 0 0 16px rgba(56, 189, 248, 0.8) !important;
+    transform: scale(1.03) !important;
 }
 
 .btn-pos {

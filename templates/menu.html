@@ -21,6 +21,9 @@
             </svg>
             <span>Lezzet Dünyası Restoran</span>
         </div>
+        <div id="tableBadge" class="table-badge">
+            🪑 M-1
+        </div>
     </header>
 
     <!-- CONTAINER (SOL SİDEBAR + SAĞ İÇERİK KATEGORİ SİSTEMİ) -->
@@ -34,13 +37,10 @@
         <!-- ARAYÜZ SPLIT YAPISI (SOL: KATEGORİLER DİKEY, SAĞ: İÇERİKLER/ÜRÜNLER) -->
         <div class="menu-split-layout">
 
-            <!-- SOL DİKEY KATEGORİ SİDEBAR'I (EN ALTTA PİNLİ MASA ROZETİ) -->
+            <!-- SOL DİKEY KATEGORİ SİDEBAR'I -->
             <aside class="category-sidebar-wrapper">
                 <div id="categoryGridBar" class="category-sidebar-list">
                     <!-- Kategoriler JS ile dikey kartlar olarak gelecek -->
-                </div>
-                <div id="tableBadge" class="table-badge-sidebar">
-                    🪑 Masa 1
                 </div>
                 <button type="button" class="rulet-sidebar-btn" onclick="MasaRuleti.open()"
                     style="display: none !important; margin-top: 8px; width: 100%; background: linear-gradient(135deg, #ffbc00, #ff8c00); color: #111; border: none; padding: 10px; border-radius: var(--radius-md); font-weight: 800; font-size: 0.85rem; cursor: pointer; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 4px 12px rgba(255,140,0,0.3);">
@@ -70,8 +70,8 @@
             <div style="display:flex; align-items:center; gap:10px;">
                 <span style="font-size: 1.3rem;">🛒</span>
                 <div style="text-align:left;">
-                    <div style="font-size:0.95rem; font-weight:800;">Sepetimi İncele</div>
-                    <div id="cartDockItemCount" style="font-size:0.78rem; opacity:0.85;">0 Ürün Eklendi</div>
+                    <div style="font-size:0.95rem; font-weight:800; color:#0f172a;">Sepetimi İncele</div>
+                    <div id="cartDockItemCount" style="font-size:0.78rem; color:#64748b; font-weight:600;">0 Ürün Eklendi</div>
                 </div>
             </div>
             <div id="cartDockTotalPrice" class="cart-dock-price">0.00 ₺</div>
