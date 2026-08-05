@@ -75,6 +75,7 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.on('durum_guncellendi', () => loadKasaData());
     socket.on('yeni_siparis', () => loadKasaData());
     socket.on('masa_durumu_degisti', () => loadKasaData());
+    socket.on('masa_tasindi', () => loadKasaData());
     socket.on('garson_onay_talebi', () => loadKasaData());
 
     // F1 - F8 VE ESC KLAVYE KISAYOLLARI DİNLEYİCİSİ (ESC: KAPAT / GERİ DÖN, F5: YENİLE)

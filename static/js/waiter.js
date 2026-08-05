@@ -9,6 +9,7 @@ let currentPinDigits = [];
 let activeGarson = null;
 let pendingActionCallback = null;
 let activeBrowsingTables = {}; // { masa_id: { masa_no: 'Masa 1', time: Date.now() } }
+let activeDetailMasaId = null;
 
 function getFormattedMasaNo(masa_no) {
     if (!masa_no) return '';
@@ -114,6 +115,7 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.on('nakit_odendi', () => loadWaiterData());
     socket.on('yeni_siparis', () => loadWaiterData());
     socket.on('masa_durumu_degisti', () => loadWaiterData());
+    socket.on('masa_tasindi', () => loadWaiterData());
     socket.on('masa_temizlendi', (data) => {
         if (data && data.masa_id) {
             delete activeBrowsingTables[data.masa_id];
@@ -330,6 +332,13 @@ async function loadWaiterData() {
 
         waiterOrders = allRawOrders.filter(o => ['garson_onayi_bekliyor', 'nakit_bekliyor', 'odendi_mutfakta', 'garson_onayladi_mutfakta', 'hazirlaniyor', 'hazir'].includes(o.siparis_durumu));
         renderWaiterDashboard();
+
+        if (activeDetailMasaId) {
+            const modal = document.getElementById('masaDetailModal');
+            if (modal && modal.classList.contains('active')) {
+                openMasaDetail(activeDetailMasaId);
+            }
+        }
     } catch (e) {
         console.error("Garson verileri yüklenemedi:", e);
     }
@@ -459,10 +468,12 @@ window.openMasaDetailWithPin = function (masaId) {
 window.closeMasaDetailModal = function () {
     document.getElementById('masaDetailModal').classList.remove('active');
     activeGarson = null;
+    activeDetailMasaId = null;
 };
 
 function openMasaDetail(masaId) {
-    const activeOrders = waiterOrders.filter(o => o.masa_id === masaId);
+    activeDetailMasaId = masaId;
+    const activeOrders = allRawOrders.filter(o => o.masa_id == masaId && o.siparis_durumu !== 'iptal' && o.siparis_durumu !== 'odendi_kapatildi');
     const hasBrowsing = activeBrowsingTables[masaId] !== undefined;
 
     let masaNo = 'Bilinmeyen Masa';

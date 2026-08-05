@@ -117,6 +117,6 @@ class SiparisRepository:
         query = """
             UPDATE Siparisler 
             SET masa_id = ? 
-            WHERE masa_id = ? AND odeme_durumu != 'odendi' AND siparis_durumu != 'iptal'
+            WHERE masa_id = ? AND siparis_durumu NOT IN ('iptal', 'odendi_kapatildi')
         """
         self.db.execute_non_query(query, (to_masa_id, from_masa_id))

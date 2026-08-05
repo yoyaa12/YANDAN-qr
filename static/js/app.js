@@ -294,6 +294,30 @@ document.addEventListener('DOMContentLoaded', async () => {
             showToast("💵 Garson nakit ödemenizi tahsil etti. Teşekkürler!");
         }
     });
+
+    socket.on('yeni_siparis', (data) => {
+        if (data && data.masa_id === state.masaId) {
+            checkActiveOrder();
+            playNotificationSound();
+        }
+    });
+
+    socket.on('masa_tasindi', (data) => {
+        if (data && data.from_masa_id === state.masaId) {
+            state.masaId = data.to_masa_id;
+            state.masaNo = data.to_masa_no || `Masa ${data.to_masa_id}`;
+
+            const url = new URL(window.location.href);
+            url.searchParams.set('masa', state.masaId);
+            window.history.replaceState({}, '', url);
+
+            const masaBadge = document.getElementById('tableBadge');
+            if (masaBadge) masaBadge.innerText = `🪑 ${state.masaNo}`;
+
+            showToast(`🚚 Masanız ${state.masaNo} masasına taşındı.`);
+            checkActiveOrder();
+        }
+    });
 });
 
 // AKICI VE KESİNTİSİZ NATIVE KATEGORİ KAYDIRMA SİSTEMİ (INTERSECTION OBSERVER)
@@ -1203,7 +1227,7 @@ async function executeOrderSubmit(odemeYontemi) {
             state.currentOrder = data.siparis;
             updateCartUI();
 
-            renderOrderTrackingUI();
+            await checkActiveOrder();
             playNotificationSound();
 
             if (odemeYontemi === 'pos') {

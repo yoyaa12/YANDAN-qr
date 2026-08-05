@@ -78,6 +78,7 @@ class SiparisService:
             await event_bus.publish("yeni_siparis", order_dict)
 
         await event_bus.publish("masa_durumu_degisti", {"masa_id": data.masa_id, "durum": "dolu"})
+        await event_bus.publish("durum_guncellendi", order_dict)
         
         if data.odeme_yontemi == "garson_kasada":
             await event_bus.publish("garson_onay_talebi", {
@@ -106,6 +107,11 @@ class SiparisService:
             masa = self.masa_repo.get_by_id(data.masa_id)
             if not masa:
                 raise HTTPException(status_code=404, detail="Geçersiz masa ID!")
+
+            # EĞER MASA BOŞ DURUMDAYKEN YENİ BİR MÜŞTERİ OTURUMU BAŞLIYORSA:
+            # GEÇMİŞ OTURUMLARDAN KALAN TÜM ESKİ KAYITLARI KAPATILDI OLARAK PASİFE AL!
+            if masa.get("durum") == "bos":
+                self.siparis_repo.clear_active_orders_for_masa(data.masa_id)
 
             siparis_kodu = f"SIP-{uuid.uuid4().hex[:6].upper()}"
             odeme_durumu, siparis_durumu = self._determine_initial_status(data.odeme_yontemi)
@@ -263,13 +269,19 @@ class SiparisService:
     async def move_masa(self, from_masa_id: int, to_masa_id: int):
         with db_transaction():
             self.siparis_repo.move_orders_between_masalar(from_masa_id, to_masa_id)
-            self.masa_repo.update_durum(to_masa_id, 'dolu')
+            to_masa = self.masa_repo.get_by_id(to_masa_id)
+            to_masa_no = to_masa.get("masa_no", f"Masa {to_masa_id}") if to_masa else f"Masa {to_masa_id}"
             
-            unpaid_cnt = self.siparis_repo.get_unpaid_count_for_masa(from_masa_id)
-            if unpaid_cnt == 0:
-                self.masa_repo.update_durum(from_masa_id, 'bos')
-                clear_browsing_table(from_masa_id)
+            self.masa_repo.update_durum(to_masa_id, 'dolu')
+            self.masa_repo.update_durum(from_masa_id, 'bos')
+            clear_browsing_table(from_masa_id)
         
+        event_payload = {
+            "from_masa_id": from_masa_id, 
+            "to_masa_id": to_masa_id,
+            "to_masa_no": to_masa_no
+        }
         await event_bus.publish("masa_durumu_degisti", {"masa_id": from_masa_id, "durum": "bos"})
         await event_bus.publish("masa_durumu_degisti", {"masa_id": to_masa_id, "durum": "dolu"})
-        await event_bus.publish("durum_guncellendi", {"from_masa_id": from_masa_id, "to_masa_id": to_masa_id})
+        await event_bus.publish("masa_tasindi", event_payload)
+        await event_bus.publish("durum_guncellendi", event_payload)
