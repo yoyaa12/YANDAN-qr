@@ -38,10 +38,10 @@
                     </p>
                 </div>
                 <div style="display: flex; flex-direction: column; gap: 8px;">
-                    <a id="btnMasa1" href="/menu?masa=1" class="btn-add" style="justify-content: center;">
+                    <a id="btnMasa1" href="/menu?masa=1" onclick="openDynamicMasaLink(1); return false;" class="btn-add" style="justify-content: center;">
                         🪑 Masa 1 QR Menüsü Aç
                     </a>
-                    <a href="/menu?masa=2" class="btn-add" style="justify-content: center; background: rgba(255,255,255,0.08); color:#fff; box-shadow:none;">
+                    <a id="btnMasa2" href="/menu?masa=2" onclick="openDynamicMasaLink(2); return false;" class="btn-add" style="justify-content: center; background: rgba(255,255,255,0.08); color:#fff; box-shadow:none;">
                         🪑 Masa 2 QR Menüsü Aç
                     </a>
                 </div>
@@ -103,14 +103,20 @@
     </main>
 
     <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            if (window.location.hostname === '192.168.1.100' || window.location.host === '192.168.1.100:8000') {
-                const btnMasa1 = document.getElementById('btnMasa1');
-                if (btnMasa1) {
-                    btnMasa1.href = '/menu?masa=99';
-                }
+        async function openDynamicMasaLink(masaId) {
+            if ((window.location.hostname === '192.168.1.100' || window.location.host === '192.168.1.100:8000') && masaId === 1) {
+                masaId = 99;
             }
-        });
+            try {
+                const res = await fetch(`/api/masalar/${masaId}/dynamic-qr`);
+                const data = await res.json();
+                if (data && data.qr_url) {
+                    window.location.href = data.qr_url;
+                    return;
+                }
+            } catch(e) {}
+                window.location.href = `/menu?masa=${masaId}`;
+        }
     </script>
 </body>
 </html>

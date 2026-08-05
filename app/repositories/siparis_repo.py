@@ -59,7 +59,7 @@ class SiparisRepository:
             SELECT s.*, m.masa_no 
             FROM Siparisler s 
             JOIN Masalar m ON s.masa_id = m.id 
-            WHERE s.masa_id = ? AND m.durum != 'bos' AND s.siparis_durumu != 'iptal'
+            WHERE s.masa_id = ? AND m.durum != 'bos' AND s.siparis_durumu NOT IN ('iptal', 'odendi_kapatildi')
             ORDER BY s.id ASC
         """
         return self.db.execute_query(query, (masa_id,)) or []
@@ -94,12 +94,12 @@ class SiparisRepository:
         return res['cnt'] if res else 0
 
     def get_unpaid_count_for_masa(self, masa_id: int) -> int:
-        query = "SELECT COUNT(*) as cnt FROM Siparisler WHERE masa_id = ? AND odeme_durumu != 'odendi' AND siparis_durumu != 'iptal'"
+        query = "SELECT COUNT(*) as cnt FROM Siparisler WHERE masa_id = ? AND odeme_durumu != 'odendi' AND siparis_durumu NOT IN ('iptal', 'odendi_kapatildi')"
         res = self.db.execute_query(query, (masa_id,), fetch_one=True)
         return res['cnt'] if res else 0
 
     def clear_active_orders_for_masa(self, masa_id: int):
-        query = "UPDATE Siparisler SET siparis_durumu = 'teslim_edildi', odeme_durumu = 'odendi' WHERE masa_id = ? AND siparis_durumu IN ('garson_onayi_bekliyor', 'nakit_bekliyor', 'odendi_mutfakta', 'garson_onayladi_mutfakta', 'hazirlaniyor', 'hazir', 'teslim_edildi')"
+        query = "UPDATE Siparisler SET siparis_durumu = 'odendi_kapatildi', odeme_durumu = 'odendi' WHERE masa_id = ? AND siparis_durumu NOT IN ('iptal', 'odendi_kapatildi')"
         self.db.execute_non_query(query, (masa_id,))
 
     def update_siparis_items(self, siparis_id: int, toplam_tutar: float, urunler: list, garson_adi: Optional[str] = None):

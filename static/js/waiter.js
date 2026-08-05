@@ -149,7 +149,7 @@ function touchGarsonActivity() {
                 garson: activeGarson,
                 lastActivity: Date.now()
             }));
-        } catch (e) {}
+        } catch (e) { }
     }
 }
 
@@ -166,7 +166,7 @@ function restoreGarsonSession() {
                 return true;
             }
         }
-    } catch (e) {}
+    } catch (e) { }
     localStorage.removeItem('activeGarsonSession');
     activeGarson = null;
     updateActiveGarsonBadge();
@@ -912,7 +912,6 @@ window.closeEditOrderModal = function () {
     currentEditItems = [];
     const modal = document.getElementById('editOrderModal');
     if (modal) modal.classList.remove('active');
-
     if (masaId) {
         openMasaDetail(masaId);
     }

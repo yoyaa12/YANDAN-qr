@@ -10,6 +10,28 @@ let discountType = 'percent'; // 'percent' or 'amount'
 let discountValue = 0;
 let partialPaymentsMap = {};
 
+// GRUPLANMIŞ ADİSYON (SEÇENEK 1) & AYRINTILAR DURUMU
+let ticketViewMode = 'grouped'; // 'grouped' veya 'batches'
+let expandedGroupDetailsMap = {};
+
+window.setTicketViewMode = function(mode) {
+    ticketViewMode = mode;
+    renderActiveTicketWorkstation();
+};
+
+window.toggleGroupDetails = function(groupKey, event) {
+    if (event) event.stopPropagation();
+    expandedGroupDetailsMap[groupKey] = !expandedGroupDetailsMap[groupKey];
+    const box = document.getElementById(`groupDetails_${groupKey}`);
+    const btn = document.getElementById(`btnAyrintilar_${groupKey}`);
+    if (box) {
+        box.style.display = expandedGroupDetailsMap[groupKey] ? 'block' : 'none';
+    }
+    if (btn) {
+        btn.innerHTML = expandedGroupDetailsMap[groupKey] ? '▲ Gizle' : '🔍 Ayrıntılar';
+    }
+};
+
 // GİRİŞ KISITLAMASI (Küsürat limitleyici)
 window.limitDecimals = function(el) {
     if (el.value.includes('.')) {
@@ -320,13 +342,15 @@ function renderActiveTicketWorkstation() {
         if (badgeEl) { badgeEl.innerText = "Masa Seçiniz"; badgeEl.className = "vega-badge-status"; }
         if (metaEl) metaEl.innerText = "";
         if (tbody) tbody.innerHTML = `<div class="vega-empty-ticket" style="text-align:center; padding:40px 20px; color:var(--text-muted);"><div style="font-size:2.5rem; margin-bottom:8px;">🛒</div><div>Lütfen masalar ekranından bir masaya tıklayınız.</div></div>`;
-        updateFinancialSummary(0);
+        updateFinancialSummary(0, 0);
         return;
     }
 
-    const masaOrders = kasaOrders.filter(o => o.masa_id == table.id && o.odeme_durumu !== 'odendi' && o.siparis_durumu !== 'iptal');
+    const allMasaOrders = kasaOrders.filter(o => o.masa_id == table.id && o.siparis_durumu !== 'iptal' && o.siparis_durumu !== 'odendi_kapatildi');
+    const openMasaOrders = allMasaOrders.filter(o => o.odeme_durumu !== 'odendi');
+
     const isHesap = table.durum === 'hesap_istendi';
-    const isDolu = table.durum === 'dolu' || masaOrders.length > 0;
+    const isDolu = table.durum === 'dolu' || openMasaOrders.length > 0;
 
     if (titleEl) titleEl.innerText = `🪑 ${getFormattedMasaNo(table.masa_no)} - ADİSYON DETAYI`;
     if (badgeEl) {
@@ -345,130 +369,307 @@ function renderActiveTicketWorkstation() {
     }
 
     currentTableItems = [];
-    let subtotal = 0;
+    let grandTotalSum = 0;
+    let alreadyPaidSum = 0;
 
-    if (masaOrders.length === 0) {
+    if (allMasaOrders.length === 0) {
         if (metaEl) {
             metaEl.innerHTML = `<span>Açık Sipariş Bulunmuyor</span>`;
         }
         if (tbody) {
-            tbody.innerHTML = `<div class="vega-empty-ticket" style="text-align:center; padding:40px 20px; color:var(--text-muted);"><div style="font-size:2.5rem; margin-bottom:8px;">🍽️</div><div>Bu masaya ait açık sipariş bulunmuyor.</div></div>`;
+            tbody.innerHTML = `<div class="vega-empty-ticket" style="text-align:center; padding:40px 20px; color:var(--text-muted);"><div style="font-size:2.5rem; margin-bottom:8px;">🍽️</div><div>Bu masaya ait sipariş bulunmuyor.</div></div>`;
         }
     } else {
-        let batchesHtml = '';
-        masaOrders.forEach((o) => {
-            let batchTotal = 0;
-            let itemsRows = '';
+        const modeSelectorHtml = `
+            <div style="display:flex; gap:8px; margin-bottom:12px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:8px;">
+                <button type="button" class="btn-add" style="flex:1; justify-content:center; padding:8px; font-size:0.88rem; font-weight:800; background:${ticketViewMode === 'grouped' ? 'linear-gradient(135deg, #6366f1, #4f46e5)' : 'rgba(255,255,255,0.06)'}; color:${ticketViewMode === 'grouped' ? '#fff' : '#cbd5e1'};" onclick="setTicketViewMode('grouped')">
+                    📊 Gruplanmış Adisyon (Tek Satır)
+                </button>
+                <button type="button" class="btn-add" style="flex:1; justify-content:center; padding:8px; font-size:0.88rem; font-weight:800; background:${ticketViewMode === 'batches' ? 'linear-gradient(135deg, #6366f1, #4f46e5)' : 'rgba(255,255,255,0.06)'}; color:${ticketViewMode === 'batches' ? '#fff' : '#cbd5e1'};" onclick="setTicketViewMode('batches')">
+                    📦 Fiş Paketleri (${allMasaOrders.length} Paket)
+                </button>
+            </div>
+        `;
 
-            (o.detaylar || []).forEach((d, idx) => {
-                const lineTotal = parseFloat(d.ara_toplam) || ((parseFloat(d.adet) || 0) * (parseFloat(d.birim_fiyat) || 0));
-                const uniqueId = `${o.id}_${idx}`;
-                const isIkramNow = (uniqueId in ikramStateMap) ? ikramStateMap[uniqueId] : (d.is_ikram || false);
+        if (ticketViewMode === 'grouped') {
+            const groupedMap = {};
 
-                if (!isIkramNow) {
-                    batchTotal += lineTotal;
-                    subtotal += lineTotal;
+            allMasaOrders.forEach((o) => {
+                const isOrderPaid = (o.odeme_durumu === 'odendi');
+                let timeStr = '';
+                if (o.olusturma_tarihi) {
+                    if (o.olusturma_tarihi.includes('T')) {
+                        timeStr = o.olusturma_tarihi.split('T')[1].substring(0, 5);
+                    } else if (o.olusturma_tarihi.length >= 16) {
+                        timeStr = o.olusturma_tarihi.substring(11, 16);
+                    } else {
+                        timeStr = o.olusturma_tarihi;
+                    }
                 }
 
-                currentTableItems.push({
-                    uniqueId: uniqueId,
-                    siparis_id: o.id,
-                    urun_adi: d.urun_adi,
-                    adet: parseInt(d.adet) || 1,
-                    birim_fiyat: parseFloat(d.birim_fiyat) || 0,
-                    ara_toplam: lineTotal,
-                    urun_notu: d.urun_notu || '',
-                    isIkram: isIkramNow,
-                    selected: !!selectedStateMap[uniqueId]
-                });
+                (o.detaylar || []).forEach((d, idx) => {
+                    const lineTotal = parseFloat(d.ara_toplam) || ((parseFloat(d.adet) || 0) * (parseFloat(d.birim_fiyat) || 0));
+                    const uniqueId = `${o.id}_${idx}`;
+                    const isIkramNow = (uniqueId in ikramStateMap) ? ikramStateMap[uniqueId] : (d.is_ikram || false);
+                    const gKey = `${d.urun_id}_${(d.urun_notu || '').trim().toLowerCase()}`;
 
-                itemsRows += `
-                    <tr class="ticket-row-clickable ${selectedStateMap[uniqueId] ? 'selected-row' : ''} ${isIkramNow ? 'ikram-row' : ''}">
+                    if (!isIkramNow) {
+                        grandTotalSum += lineTotal;
+                        if (isOrderPaid) {
+                            alreadyPaidSum += lineTotal;
+                        }
+                    }
+
+                    currentTableItems.push({
+                        uniqueId: uniqueId,
+                        siparis_id: o.id,
+                        urun_id: d.urun_id,
+                        urun_adi: d.urun_adi,
+                        adet: parseInt(d.adet) || 1,
+                        birim_fiyat: parseFloat(d.birim_fiyat) || 0,
+                        ara_toplam: lineTotal,
+                        urun_notu: d.urun_notu || '',
+                        isIkram: isIkramNow,
+                        isPaid: isOrderPaid,
+                        selected: !!selectedStateMap[uniqueId]
+                    });
+
+                    if (!groupedMap[gKey]) {
+                        groupedMap[gKey] = {
+                            gKey: gKey,
+                            urun_id: d.urun_id,
+                            urun_adi: d.urun_adi,
+                            urun_notu: d.urun_notu || '',
+                            birim_fiyat: parseFloat(d.birim_fiyat) || 0,
+                            total_adet: 0,
+                            total_tutar: 0,
+                            paid_adet: 0,
+                            paid_tutar: 0,
+                            unpaid_adet: 0,
+                            unpaid_tutar: 0,
+                            breakdowns: []
+                        };
+                    }
+
+                    groupedMap[gKey].total_adet += (parseInt(d.adet) || 1);
+                    if (!isIkramNow) {
+                        groupedMap[gKey].total_tutar += lineTotal;
+                        if (isOrderPaid) {
+                            groupedMap[gKey].paid_adet += (parseInt(d.adet) || 1);
+                            groupedMap[gKey].paid_tutar += lineTotal;
+                        } else {
+                            groupedMap[gKey].unpaid_adet += (parseInt(d.adet) || 1);
+                            groupedMap[gKey].unpaid_tutar += lineTotal;
+                        }
+                    }
+
+                    groupedMap[gKey].breakdowns.push({
+                        siparis_id: o.id,
+                        siparis_kodu: o.siparis_kodu || '',
+                        time_str: timeStr,
+                        adet: parseInt(d.adet) || 1,
+                        line_total: isIkramNow ? 0 : lineTotal,
+                        is_paid: isOrderPaid,
+                        is_ikram: isIkramNow
+                    });
+                });
+            });
+
+            let groupedRowsHtml = '';
+            Object.values(groupedMap).forEach((g) => {
+                const isExpanded = !!expandedGroupDetailsMap[g.gKey];
+                const hasMixedPayment = g.paid_adet > 0 && g.unpaid_adet > 0;
+                const isAllPaid = g.paid_adet > 0 && g.unpaid_adet === 0;
+
+                let statusBadge = '';
+                if (hasMixedPayment) {
+                    statusBadge = `<span style="background:rgba(245,158,11,0.2); color:#fbbf24; border:1px solid rgba(245,158,11,0.4); padding:2px 6px; border-radius:6px; font-size:0.72rem; font-weight:800;">⚡ PARÇALI ÖDENMİŞ (${g.paid_adet} Kart / ${g.unpaid_adet} Kasa)</span>`;
+                } else if (isAllPaid) {
+                    statusBadge = `<span style="background:rgba(16,185,129,0.2); color:#34d399; border:1px solid rgba(16,185,129,0.4); padding:2px 6px; border-radius:6px; font-size:0.72rem; font-weight:800;">✅ TÜMÜ ÖDENDİ (POS)</span>`;
+                } else {
+                    statusBadge = `<span style="background:rgba(99,102,241,0.15); color:#a5b4fc; border:1px solid rgba(99,102,241,0.3); padding:2px 6px; border-radius:6px; font-size:0.72rem; font-weight:800;">⏳ KASADA ÖDENECEK</span>`;
+                }
+
+                let detailSublines = g.breakdowns.map(b => `
+                    <div class="detail-subline ${b.is_paid ? 'paid-line' : 'unpaid-line'}">
+                        <span>
+                            ${b.is_paid ? '🟢' : '🟡'} <strong>${b.adet} Adet</strong> — 
+                            ${b.is_paid ? '💳 Kredi Kartı / QR POS (Ödendi)' : '💵 Kasada Tahsil Edilecek'}
+                            ${b.time_str ? `<span style="opacity:0.85; margin-left:6px;">⏰ Saat: ${b.time_str}</span>` : ''}
+                            <span style="opacity:0.7; margin-left:4px;">(Fiş #${b.siparis_id})</span>
+                        </span>
+                        <strong>${b.line_total.toFixed(2)} ₺</strong>
+                    </div>
+                `).join('');
+
+                groupedRowsHtml += `
+                    <tr class="ticket-row-clickable">
                         <td>
-                            <strong style="color:#fff;">${d.urun_adi}</strong>
-                            ${d.urun_notu ? `<div style="font-size:0.75rem; color:var(--text-secondary);">${d.urun_notu}</div>` : ''}
+                            <div style="display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
+                                <strong style="color:#fff; font-size:1.05rem;">${g.urun_adi}</strong>
+                                ${statusBadge}
+                                <button id="btnAyrintilar_${g.gKey}" type="button" class="btn-ayrintilar-chip" onclick="toggleGroupDetails('${g.gKey}', event)">
+                                    ${isExpanded ? '▲ Gizle' : '🔍 Ayrıntılar'}
+                                </button>
+                            </div>
+                            ${g.urun_notu ? `<div style="font-size:0.78rem; color:var(--text-secondary); margin-top:2px;">Not: ${g.urun_notu}</div>` : ''}
+
+                            <div id="groupDetails_${g.gKey}" class="grouped-details-box" style="display: ${isExpanded ? 'block' : 'none'};">
+                                <div class="grouped-details-header">📊 Sipariş Saatleri & Parçalı Ödeme Kırılımı:</div>
+                                ${detailSublines}
+                            </div>
                         </td>
-                        <td style="text-align: center; font-weight:800; color:#fff;">${d.adet}</td>
-                        <td style="text-align: right; color:#94a3b8;">${parseFloat(d.birim_fiyat).toFixed(2)} ₺</td>
-                        <td style="text-align: right; font-weight:700;">
-                            ${isIkramNow ? `<span style="color:#ef4444; background:rgba(239,68,68,0.15); padding:2px 6px; border-radius:4px;">🎁 İKRAM (0 ₺)</span>` : '-'}
-                        </td>
-                        <td style="text-align: right; font-weight:800; color:#fbbf24;">${isIkramNow ? '0.00 ₺' : lineTotal.toFixed(2) + ' ₺'}</td>
+                        <td style="text-align: center; font-weight:900; color:#fff; font-size:1.1rem;">${g.total_adet}</td>
+                        <td style="text-align: right; color:#94a3b8;">${g.birim_fiyat.toFixed(2)} ₺</td>
+                        <td style="text-align: right; font-weight:900; color:#fbbf24; font-size:1.1rem;">${g.total_tutar.toFixed(2)} ₺</td>
                     </tr>
                 `;
             });
 
-            const isPaid = (o.odeme_durumu === 'odendi');
-            let createdTimeStr = '';
-            if (o.olusturma_tarihi) {
-                if (o.olusturma_tarihi.includes('T')) {
-                    createdTimeStr = o.olusturma_tarihi.split('T')[1].substring(0, 5);
-                } else if (o.olusturma_tarihi.length >= 16) {
-                    createdTimeStr = o.olusturma_tarihi.substring(11, 16);
-                }
-            }
-
-            batchesHtml += `
-                <div class="batch-card" style="background: rgba(15, 23, 42, 0.85); border: 1.5px solid rgba(255, 255, 255, 0.12); border-radius: 12px; margin-bottom: 16px; padding: 14px; box-shadow: 0 4px 14px rgba(0,0,0,0.3);">
-                    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 8px; margin-bottom: 10px;">
-                        <div style="display: flex; align-items: center; gap: 10px;">
-                            <span style="font-size: 1.05rem; font-weight: 800; color: #fbbf24;">📦 FİŞ #${o.id} (${o.siparis_kodu || 'SİPARİŞ'})</span>
-                            ${createdTimeStr ? `<span style="font-size: 0.8rem; background: rgba(255,255,255,0.08); color: #cbd5e1; padding: 2px 8px; border-radius: 6px;">⏰ Saat: ${createdTimeStr}</span>` : ''}
-                        </div>
-                        <div>
-                            ${isPaid 
-                                ? `<span style="background: rgba(16,185,129,0.2); color:#34d399; border:1px solid rgba(16,185,129,0.4); padding:3px 8px; border-radius:6px; font-size:0.8rem; font-weight:700;">✅ ÖDENDİ</span>` 
-                                : `<span style="background: rgba(245,158,11,0.2); color:#fbbf24; border:1px solid rgba(245,158,11,0.4); padding:3px 8px; border-radius:6px; font-size:0.8rem; font-weight:700;">⏳ NAKİT TAHSİLAT BEKLİYOR</span>`}
-                        </div>
+            const contentTable = `
+                ${modeSelectorHtml}
+                <div class="batch-card" style="background: rgba(15, 23, 42, 0.85); border: 1.5px solid rgba(255, 255, 255, 0.12); border-radius: 12px; padding: 14px; box-shadow: 0 4px 14px rgba(0,0,0,0.3);">
+                    <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:8px; margin-bottom:12px;">
+                        <span style="font-size:1.05rem; font-weight:800; color:#fbbf24;">🧾 MASANIN TÜM ÜRÜNLERİ (GRUPLANMIŞ ADİSYON)</span>
+                        <span style="font-size:0.8rem; color:#cbd5e1;">Toplam: <strong>${Object.keys(groupedMap).length} Çeşit Ürün</strong></span>
                     </div>
-
-                    <table class="vega-ticket-table" style="width:100%; margin-bottom: 10px;">
+                    <table class="vega-ticket-table" style="width:100%;">
                         <thead>
                             <tr>
-                                <th>Ürün Adı & Notu</th>
-                                <th style="text-align: center; width: 60px;">Adet</th>
+                                <th>Ürün Adı & Ayrıntılar</th>
+                                <th style="text-align: center; width: 70px;">Adet</th>
                                 <th style="text-align: right; width: 100px;">Birim Fiyat</th>
-                                <th style="text-align: right; width: 120px;">İskonto/İkram</th>
-                                <th style="text-align: right; width: 100px;">Toplam</th>
+                                <th style="text-align: right; width: 110px;">Toplam</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${itemsRows}
+                            ${groupedRowsHtml}
                         </tbody>
                     </table>
-
-                    <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.3); padding: 10px 14px; border-radius: 8px; border-top: 1px solid rgba(255,255,255,0.05);">
-                        <div>
-                            <span style="font-size: 0.88rem; color: #cbd5e1;">Fiş Paketi Tutarı:</span>
-                            <strong style="font-size: 1.15rem; color: #fff; margin-left: 6px;">${batchTotal.toFixed(2)} ₺</strong>
-                        </div>
-                        ${!isPaid ? `
-                            <button type="button" class="btn-add" style="padding: 7px 16px; font-size: 0.85rem; font-weight: 800; background: linear-gradient(135deg, #10b981, #059669); box-shadow: 0 4px 12px rgba(16,185,129,0.35);" onclick="paySingleSiparisBatch(${o.id}, ${batchTotal})">
-                                💵 Bu Fiş Paketini Tahsil Et (${batchTotal.toFixed(2)} ₺)
-                            </button>
-                        ` : ''}
-                    </div>
                 </div>
             `;
-        });
+            if (tbody) tbody.innerHTML = contentTable;
+
+        } else {
+            let batchesHtml = modeSelectorHtml;
+            allMasaOrders.forEach((o) => {
+                let batchTotal = 0;
+                let itemsRows = '';
+
+                (o.detaylar || []).forEach((d, idx) => {
+                    const lineTotal = parseFloat(d.ara_toplam) || ((parseFloat(d.adet) || 0) * (parseFloat(d.birim_fiyat) || 0));
+                    const uniqueId = `${o.id}_${idx}`;
+                    const isIkramNow = (uniqueId in ikramStateMap) ? ikramStateMap[uniqueId] : (d.is_ikram || false);
+
+                    if (!isIkramNow) {
+                        batchTotal += lineTotal;
+                        grandTotalSum += lineTotal;
+                        if (o.odeme_durumu === 'odendi') alreadyPaidSum += lineTotal;
+                    }
+
+                    currentTableItems.push({
+                        uniqueId: uniqueId,
+                        siparis_id: o.id,
+                        urun_adi: d.urun_adi,
+                        adet: parseInt(d.adet) || 1,
+                        birim_fiyat: parseFloat(d.birim_fiyat) || 0,
+                        ara_toplam: lineTotal,
+                        urun_notu: d.urun_notu || '',
+                        isIkram: isIkramNow,
+                        isPaid: (o.odeme_durumu === 'odendi'),
+                        selected: !!selectedStateMap[uniqueId]
+                    });
+
+                    itemsRows += `
+                        <tr class="ticket-row-clickable ${selectedStateMap[uniqueId] ? 'selected-row' : ''} ${isIkramNow ? 'ikram-row' : ''}">
+                            <td>
+                                <strong style="color:#fff;">${d.urun_adi}</strong>
+                                ${d.urun_notu ? `<div style="font-size:0.75rem; color:var(--text-secondary);">${d.urun_notu}</div>` : ''}
+                            </td>
+                            <td style="text-align: center; font-weight:800; color:#fff;">${d.adet}</td>
+                            <td style="text-align: right; color:#94a3b8;">${parseFloat(d.birim_fiyat).toFixed(2)} ₺</td>
+                            <td style="text-align: right; font-weight:700;">
+                                ${isIkramNow ? `<span style="color:#ef4444; background:rgba(239,68,68,0.15); padding:2px 6px; border-radius:4px;">🎁 İKRAM (0 ₺)</span>` : '-'}
+                            </td>
+                            <td style="text-align: right; font-weight:800; color:#fbbf24;">${isIkramNow ? '0.00 ₺' : lineTotal.toFixed(2) + ' ₺'}</td>
+                        </tr>
+                    `;
+                });
+
+                const isPaid = (o.odeme_durumu === 'odendi');
+                let createdTimeStr = '';
+                if (o.olusturma_tarihi) {
+                    if (o.olusturma_tarihi.includes('T')) {
+                        createdTimeStr = o.olusturma_tarihi.split('T')[1].substring(0, 5);
+                    } else if (o.olusturma_tarihi.length >= 16) {
+                        createdTimeStr = o.olusturma_tarihi.substring(11, 16);
+                    } else {
+                        createdTimeStr = o.olusturma_tarihi;
+                    }
+                }
+
+                batchesHtml += `
+                    <div class="batch-card" style="background: rgba(15, 23, 42, 0.85); border: 1.5px solid rgba(255, 255, 255, 0.12); border-radius: 12px; margin-bottom: 16px; padding: 14px; box-shadow: 0 4px 14px rgba(0,0,0,0.3);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 8px; margin-bottom: 10px;">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <span style="font-size: 1.05rem; font-weight: 800; color: #fbbf24;">📦 FİŞ #${o.id} (${o.siparis_kodu || 'SİPARİŞ'})</span>
+                                ${createdTimeStr ? `<span style="font-size: 0.8rem; background: rgba(255,255,255,0.08); color: #cbd5e1; padding: 2px 8px; border-radius: 6px;">⏰ Saat: ${createdTimeStr}</span>` : ''}
+                            </div>
+                            <div>
+                                ${isPaid 
+                                    ? `<span style="background: rgba(16,185,129,0.2); color:#34d399; border:1px solid rgba(16,185,129,0.4); padding:3px 8px; border-radius:6px; font-size:0.8rem; font-weight:700;">✅ ÖDENDİ</span>` 
+                                    : `<span style="background: rgba(245,158,11,0.2); color:#fbbf24; border:1px solid rgba(245,158,11,0.4); padding:3px 8px; border-radius:6px; font-size:0.8rem; font-weight:700;">⏳ NAKİT TAHSİLAT BEKLİYOR</span>`}
+                            </div>
+                        </div>
+
+                        <table class="vega-ticket-table" style="width:100%; margin-bottom: 10px;">
+                            <thead>
+                                <tr>
+                                    <th>Ürün Adı & Notu</th>
+                                    <th style="text-align: center; width: 60px;">Adet</th>
+                                    <th style="text-align: right; width: 100px;">Birim Fiyat</th>
+                                    <th style="text-align: right; width: 120px;">İskonto/İkram</th>
+                                    <th style="text-align: right; width: 100px;">Toplam</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${itemsRows}
+                            </tbody>
+                        </table>
+
+                        <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.3); padding: 10px 14px; border-radius: 8px; border-top: 1px solid rgba(255,255,255,0.05);">
+                            <div>
+                                <span style="font-size: 0.88rem; color: #cbd5e1;">Fiş Paketi Tutarı:</span>
+                                <strong style="font-size: 1.15rem; color: #fff; margin-left: 6px;">${batchTotal.toFixed(2)} ₺</strong>
+                            </div>
+                            ${!isPaid ? `
+                                <button type="button" class="btn-add" style="padding: 7px 16px; font-size: 0.85rem; font-weight: 800; background: linear-gradient(135deg, #10b981, #059669); box-shadow: 0 4px 12px rgba(16,185,129,0.35);" onclick="paySingleSiparisBatch(${o.id}, ${batchTotal})">
+                                    💵 Bu Fiş Paketini Tahsil Et (${batchTotal.toFixed(2)} ₺)
+                                </button>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            });
+
+            if (tbody) tbody.innerHTML = batchesHtml;
+        }
 
         if (metaEl) {
             metaEl.innerHTML = `
-                <span>Kalem Sayısı: <strong>${currentTableItems.length} Ürün</strong></span> | 
-                <span>Sipariş Sayısı: <strong>${masaOrders.length} Fiş Paketi</strong></span>
+                <span>Masa Sipariş Paketleri: <strong>${allMasaOrders.length} Fiş</strong></span> | 
+                <span>Açık Paket: <strong>${openMasaOrders.length} Adet</strong></span>
             `;
         }
-
-        if (tbody) tbody.innerHTML = batchesHtml;
     }
 
-    updateFinancialSummary(subtotal);
+    updateFinancialSummary(grandTotalSum, alreadyPaidSum);
 }
 
 function getActiveMasaSubtotal() {
     const table = kasaTables.find(t => t.id == activeMasaId);
     if (!table) return 0;
-    const masaOrders = kasaOrders.filter(o => o.masa_id == table.id && o.odeme_durumu !== 'odendi' && o.siparis_durumu !== 'iptal');
+    const masaOrders = kasaOrders.filter(o => o.masa_id == table.id && o.siparis_durumu !== 'iptal');
 
     let itemsTotalSum = 0;
     currentTableItems.forEach(item => {
@@ -485,7 +686,7 @@ function getActiveMasaSubtotal() {
     return itemsTotalSum > 0 ? itemsTotalSum : orderTotalSum;
 }
 
-function updateFinancialSummary(subtotal) {
+function updateFinancialSummary(subtotal, alreadyPaidFromOrders = 0) {
     const subtotalVal = subtotal > 0 ? subtotal : getActiveMasaSubtotal();
 
     let calculatedDiscount = 0;
@@ -497,7 +698,9 @@ function updateFinancialSummary(subtotal) {
         }
     }
 
-    const paidBefore = activeMasaId ? (parseFloat(partialPaymentsMap[activeMasaId]) || 0) : 0;
+    const manualPartialPaid = activeMasaId ? (parseFloat(partialPaymentsMap[activeMasaId]) || 0) : 0;
+    const paidBefore = alreadyPaidFromOrders + manualPartialPaid;
+
     const toplamVal = Math.max(0, subtotalVal);
     const kalanVal = Math.max(0, toplamVal - calculatedDiscount - paidBefore);
 
@@ -1311,6 +1514,7 @@ window.showDynamicQRModal = async function (masaId) {
             const qrImg = document.getElementById("modalQRImage");
             const tokenEl = document.getElementById("modalQRToken");
             const timerEl = document.getElementById("qrRemainingTimer");
+            const linkEl = document.getElementById("modalQRLink");
 
             const qrTargetUrl = window.location.origin + data.qr_url;
             const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(qrTargetUrl)}`;
@@ -1318,6 +1522,7 @@ window.showDynamicQRModal = async function (masaId) {
             if (qrImg) qrImg.src = qrApiUrl;
             if (tokenEl) tokenEl.innerText = data.token;
             if (timerEl) timerEl.innerText = data.remaining_seconds;
+            if (linkEl) linkEl.href = data.qr_url;
             return data;
         } catch (e) {
             console.error("QR modal update error:", e);
@@ -1353,7 +1558,7 @@ window.showDynamicQRModal = async function (masaId) {
                     </div>
                     
                     <div style="margin-top:14px;">
-                        <a href="${data.qr_url}" target="_blank" style="color:#6366f1; font-size:0.8rem; text-decoration:underline;">🔗 Masa Menü Linkine Doğrudan Git</a>
+                        <a id="modalQRLink" href="${data.qr_url}" target="_blank" style="color:#6366f1; font-size:0.8rem; text-decoration:underline;">🔗 Masa Menü Linkine Doğrudan Git</a>
                     </div>
                 </div>
             </div>
