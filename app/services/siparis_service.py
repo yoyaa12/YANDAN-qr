@@ -25,6 +25,8 @@ def sanitize_for_json(data):
         return float(data)
     return data
 
+TABLE_MOVES_MAP = {}
+
 class SiparisService:
     def __init__(
         self, 
@@ -104,12 +106,16 @@ class SiparisService:
                 raise HTTPException(status_code=403, detail="Erişiminiz engellendi. Cihazınız yasaklı.")
 
         with db_transaction():
+            if data.masa_id in TABLE_MOVES_MAP:
+                target_id = TABLE_MOVES_MAP[data.masa_id]
+                target_masa = self.masa_repo.get_by_id(target_id)
+                if target_masa and target_masa.get("durum") != "bos":
+                    data.masa_id = target_id
+
             masa = self.masa_repo.get_by_id(data.masa_id)
             if not masa:
                 raise HTTPException(status_code=404, detail="Geçersiz masa ID!")
 
-            # EĞER MASA BOŞ DURUMDAYKEN YENİ BİR MÜŞTERİ OTURUMU BAŞLIYORSA:
-            # GEÇMİŞ OTURUMLARDAN KALAN TÜM ESKİ KAYITLARI KAPATILDI OLARAK PASİFE AL!
             if masa.get("durum") == "bos":
                 self.siparis_repo.clear_active_orders_for_masa(data.masa_id)
 
@@ -233,6 +239,10 @@ class SiparisService:
             self.masa_repo.update_durum(masa_id, 'bos')
             self.siparis_repo.clear_active_orders_for_masa(masa_id)
             clear_browsing_table(masa_id)
+            TABLE_MOVES_MAP.pop(masa_id, None)
+            for k, v in list(TABLE_MOVES_MAP.items()):
+                if v == masa_id:
+                    TABLE_MOVES_MAP.pop(k, None)
         
         event_payload = {"masa_id": masa_id, "durum": "bos"}
         await event_bus.publish("masa_durumu_degisti", event_payload)
@@ -275,13 +285,14 @@ class SiparisService:
             self.masa_repo.update_durum(to_masa_id, 'dolu')
             self.masa_repo.update_durum(from_masa_id, 'bos')
             clear_browsing_table(from_masa_id)
+            TABLE_MOVES_MAP[from_masa_id] = to_masa_id
         
         event_payload = {
             "from_masa_id": from_masa_id, 
             "to_masa_id": to_masa_id,
-            "to_masa_no": to_masa_no
+            "to_masa_no": to_masa_no,
+            "is_move": True
         }
-        await event_bus.publish("masa_durumu_degisti", {"masa_id": from_masa_id, "durum": "bos"})
-        await event_bus.publish("masa_durumu_degisti", {"masa_id": to_masa_id, "durum": "dolu"})
         await event_bus.publish("masa_tasindi", event_payload)
+        await event_bus.publish("masa_durumu_degisti", {"masa_id": to_masa_id, "durum": "dolu", "is_move": True})
         await event_bus.publish("durum_guncellendi", event_payload)

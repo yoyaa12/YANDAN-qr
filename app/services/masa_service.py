@@ -79,8 +79,15 @@ class MasaService:
             return False
             
         totp_secret = masa.get("totp_secret")
-        if not totp_secret:
-            return False
-            
-        return verify_dynamic_token(masa_id, totp_secret, token)
+        if totp_secret and verify_dynamic_token(masa_id, totp_secret, token):
+            return True
+
+        from app.services.siparis_service import TABLE_MOVES_MAP
+        for from_id, to_id in TABLE_MOVES_MAP.items():
+            if to_id == masa_id:
+                from_masa = self.repo.get_by_id(from_id)
+                if from_masa and from_masa.get("totp_secret"):
+                    if verify_dynamic_token(from_id, from_masa.get("totp_secret"), token):
+                        return True
+        return False
 

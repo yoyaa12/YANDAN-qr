@@ -96,3 +96,8 @@ async def on_durum_guncellendi(payload):
 async def on_masa_temizlendi(payload):
     await sio.emit("masa_temizlendi", payload)
 
+@event_bus.subscribe("masa_tasindi")
+async def on_masa_tasindi(payload):
+    await sio.emit("masa_tasindi", payload)
+
+

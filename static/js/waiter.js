@@ -115,7 +115,12 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.on('nakit_odendi', () => loadWaiterData());
     socket.on('yeni_siparis', () => loadWaiterData());
     socket.on('masa_durumu_degisti', () => loadWaiterData());
-    socket.on('masa_tasindi', () => loadWaiterData());
+    socket.on('masa_tasindi', (data) => {
+        if (data && activeDetailMasaId && parseInt(activeDetailMasaId) === parseInt(data.from_masa_id)) {
+            activeDetailMasaId = parseInt(data.to_masa_id);
+        }
+        loadWaiterData();
+    });
     socket.on('masa_temizlendi', (data) => {
         if (data && data.masa_id) {
             delete activeBrowsingTables[data.masa_id];

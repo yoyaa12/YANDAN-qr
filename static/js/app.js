@@ -254,9 +254,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     socket.on('durum_guncellendi', (data) => {
-        if (data.masa_id === state.masaId) {
+        if (data && data.is_move) return;
+        if (data && data.masa_id === state.masaId) {
             if (data.yeni_durum === 'bos') {
                 state.currentOrder = null;
+                state.activeOrders = [];
                 const container = document.getElementById('orderTrackingContainer');
                 if (container) container.style.display = 'none';
             } else {
@@ -267,8 +269,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     socket.on('masa_temizlendi', (data) => {
+        if (data && data.is_move) return;
         if (data && data.masa_id === state.masaId) {
             state.currentOrder = null;
+            state.activeOrders = [];
             state.cart = [];
             updateCartUI();
             const container = document.getElementById('orderTrackingContainer');
@@ -278,8 +282,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     socket.on('masa_durumu_degisti', (data) => {
+        if (data && data.is_move) return;
         if (data && data.masa_id === state.masaId && data.durum === 'bos') {
             state.currentOrder = null;
+            state.activeOrders = [];
             state.cart = [];
             updateCartUI();
             const container = document.getElementById('orderTrackingContainer');
@@ -288,7 +294,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     socket.on('nakit_odendi', (data) => {
-        if (data.masa_id === state.masaId) {
+        if (data && data.masa_id === state.masaId) {
             checkActiveOrder();
             playNotificationSound();
             showToast("💵 Garson nakit ödemenizi tahsil etti. Teşekkürler!");
@@ -303,8 +309,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     socket.on('masa_tasindi', (data) => {
-        if (data && data.from_masa_id === state.masaId) {
-            state.masaId = data.to_masa_id;
+        if (data && parseInt(data.from_masa_id) === parseInt(state.masaId)) {
+            state.masaId = parseInt(data.to_masa_id);
             state.masaNo = data.to_masa_no || `Masa ${data.to_masa_id}`;
 
             const url = new URL(window.location.href);
@@ -312,9 +318,13 @@ document.addEventListener('DOMContentLoaded', async () => {
             window.history.replaceState({}, '', url);
 
             const masaBadge = document.getElementById('tableBadge');
-            if (masaBadge) masaBadge.innerText = `🪑 ${state.masaNo}`;
+            if (masaBadge) {
+                const shortNo = formatShortMasaNo(state.masaNo);
+                masaBadge.innerHTML = `🪑 ${shortNo}`;
+                masaBadge.title = state.masaNo;
+            }
 
-            showToast(`🚚 Masanız ${state.masaNo} masasına taşındı.`);
+            showToast(`Adisyonunuz ${state.masaNo} masasına taşındı.`);
             checkActiveOrder();
         }
     });
@@ -1260,6 +1270,12 @@ function formatOrderTime(val) {
     return '';
 }
 
+let expandedGroupDetailsMap = {};
+window.toggleGroupDetails = function(key) {
+    expandedGroupDetailsMap[key] = !expandedGroupDetailsMap[key];
+    renderOrderTrackingUI();
+};
+
 // CANLI SİPARİŞ TAKİP EKRANI (F5 İLE KANANMAZ + SİPARİŞ VERİLEN ÜRÜNLERİN LİSTESİ)
 function renderOrderTrackingUI() {
     const container = document.getElementById('orderTrackingContainer');
@@ -1348,37 +1364,74 @@ function renderOrderTrackingUI() {
         `;
     }
 
-    // TÜM SİPARİŞLERİN (ADİSYONUN) LİSTESİ
-    let ordersListHTML = '';
+    // MASANIN TÜM ÜRÜNLERİNİ GRUPLAMA (Option 1 - Grouped Adisyon)
+    const groupedItemsMap = {};
 
     orders.forEach((ord, index) => {
         const orderTime = formatOrderTime(ord.olusturma_tarihi);
-
         const isPaid = ord.odeme_durumu === 'odendi';
-        const paymentBadge = isPaid
-            ? `<span style="background: rgba(16, 185, 129, 0.15); border: 1px solid #10b981; color: #10b981; font-weight: 800; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem;">Ödendi</span>`
-            : `<span style="background: rgba(245, 158, 11, 0.15); border: 1px solid #f59e0b; color: #f59e0b; font-weight: 800; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem;">Ödeme Kasada Yapılacak</span>`;
-
-        let itemsHTML = '';
         const detaylar = ord.detaylar || [];
+
         detaylar.forEach(item => {
-            itemsHTML += `
-                <div style="display: flex; justify-content: space-between; font-size: 0.88rem; color: var(--text-primary); padding: 2px 0;">
-                    <span>${item.adet}x ${item.urun_adi}</span>
-                    <span>${(item.ara_toplam || (item.adet * item.birim_fiyat)).toFixed(2)} ₺</span>
+            const key = item.urun_adi + '_' + (item.urun_notu || '');
+            if (!groupedItemsMap[key]) {
+                groupedItemsMap[key] = {
+                    urun_adi: item.urun_adi,
+                    total_adet: 0,
+                    birim_fiyat: item.birim_fiyat,
+                    total_tutar: 0,
+                    urun_notu: item.urun_notu || '',
+                    sublines: []
+                };
+            }
+            const group = groupedItemsMap[key];
+            group.total_adet += item.adet;
+            group.total_tutar += (item.ara_toplam || (item.adet * item.birim_fiyat));
+            group.sublines.push({
+                orderIndex: index + 1,
+                orderTime: orderTime,
+                adet: item.adet,
+                tutar: (item.ara_toplam || (item.adet * item.birim_fiyat)),
+                isPaid: isPaid
+            });
+        });
+    });
+
+    let ordersListHTML = '';
+    const groupKeys = Object.keys(groupedItemsMap);
+
+    groupKeys.forEach((key, idx) => {
+        const group = groupedItemsMap[key];
+        const isExpanded = expandedGroupDetailsMap[key] || false;
+
+        let sublinesHTML = '';
+        group.sublines.forEach(sub => {
+            sublinesHTML += `
+                <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.78rem; padding: 3px 0; color:#cbd5e1; border-bottom: 1px dashed rgba(255,255,255,0.06);">
+                    <span>Sipariş ${sub.orderIndex} ${sub.orderTime ? `• ${sub.orderTime}` : ''} (${sub.adet}x)</span>
+                    <span>${sub.isPaid ? '<span style="color:#10b981; font-weight:700;">🟢 Ödendi</span>' : '<span style="color:#f59e0b; font-weight:700;">🟡 Kasada Ödenecek</span>'} • ${sub.tutar.toFixed(2)} ₺</span>
                 </div>
             `;
         });
 
         ordersListHTML += `
-            <div style="padding: 8px 0; ${index > 0 ? 'border-top: 1px dashed rgba(255,255,255,0.1);' : ''}">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                    <span style="font-size: 0.78rem; color: var(--text-secondary); font-weight: 600;">
-                        Sipariş ${index + 1} ${orderTime ? `• ${orderTime}` : ''}
-                    </span>
-                    ${paymentBadge}
+            <div style="padding: 8px 0; ${idx > 0 ? 'border-top: 1px dashed rgba(255,255,255,0.1);' : ''}">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <span style="font-weight: 800; font-size: 0.95rem; color: #fff;">${group.total_adet}x ${group.urun_adi}</span>
+                        ${group.urun_notu ? `<div style="font-size:0.75rem; color:#94a3b8;">Not: ${group.urun_notu}</div>` : ''}
+                    </div>
+                    <div style="display:flex; align-items:center; gap: 8px;">
+                        <span style="font-weight: 800; font-size: 0.95rem; color: #fbbf24;">${group.total_tutar.toFixed(2)} ₺</span>
+                        <button type="button" onclick="toggleGroupDetails('${key}')" style="background: rgba(99,102,241,0.15); border: 1px solid rgba(99,102,241,0.4); color: #a5b4fc; border-radius: 6px; padding: 2px 6px; font-size: 0.7rem; font-weight: 700; cursor: pointer;">
+                            ${isExpanded ? '▲ Gizle' : '🔍 Ayrıntılar'}
+                        </button>
+                    </div>
                 </div>
-                ${itemsHTML}
+
+                <div id="groupDetails_${key}" style="display: ${isExpanded ? 'block' : 'none'}; margin-top: 6px; background: rgba(0,0,0,0.3); border-radius: 8px; padding: 6px 10px;">
+                    ${sublinesHTML}
+                </div>
             </div>
         `;
     });
@@ -1389,7 +1442,7 @@ function renderOrderTrackingUI() {
 
             <!-- MASANIN TÜM ADİSYON DÖKÜMÜ -->
             <div style="margin-top: 12px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px;">
-                <div>
+                <div class="tracking-scroll-list" style="max-height: 230px;">
                     ${ordersListHTML}
                 </div>
 
@@ -1400,8 +1453,9 @@ function renderOrderTrackingUI() {
             </div>
 
             <!-- KUTUCUKLARIN SAĞ ALTTAKİ KAPANIR OK BUTONU -->
-            <div style="display: flex; justify-content: flex-end; padding-top: 6px;">
-                <span onclick="toggleTrackingUI()" style="cursor: pointer; padding: 4px;" title="Adisyonu Gizle">
+            <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 6px; cursor: pointer;" onclick="toggleTrackingUI()">
+                <span style="font-size: 0.78rem; color: #94a3b8; font-weight: 700;">💡 Adisyonu küçültmek için tıklayın</span>
+                <span style="padding: 4px;" title="Adisyonu Gizle">
                     ${chevronUpSVG}
                 </span>
             </div>
