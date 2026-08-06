@@ -13,6 +13,7 @@ class SiparisOlusturModel(BaseModel):
     odeme_yontemi: Optional[str] = "pos" # pos veya nakit
     urunler: List[SiparisItemModel]
     device_id: Optional[str] = None
+    current_totp_token: Optional[str] = None
 
 class SiparisDuzenleModel(BaseModel):
     toplam_tutar: float

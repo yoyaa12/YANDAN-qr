@@ -199,7 +199,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const verifyRes = await fetch(`/api/masalar/${state.masaId}/verify-qr`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ token: tokenParam })
+                body: JSON.stringify({ token: tokenParam, device_id: state.deviceId })
             });
             const verifyData = await verifyRes.json();
             if (!verifyData.valid) {
@@ -1278,6 +1278,10 @@ async function executeOrderSubmit(odemeYontemi) {
         }))
     };
 
+    if (state.currentTotpToken) {
+        payload.current_totp_token = state.currentTotpToken;
+    }
+
     try {
         const res = await fetch('/api/siparisler', {
             method: 'POST',
@@ -1290,6 +1294,7 @@ async function executeOrderSubmit(odemeYontemi) {
         if (res.ok) {
             state.cart = [];
             state.currentOrder = data.siparis;
+            state.currentTotpToken = null; // Başarılı olunca temizle
             updateCartUI();
 
             await checkActiveOrder();
@@ -1300,11 +1305,62 @@ async function executeOrderSubmit(odemeYontemi) {
             } else {
                 showToast("🛎️ Siparişiniz iletildi! Garsonumuz masanıza geliyor.");
             }
+        } else if (res.status === 403 && data.detail && data.detail.includes("6 haneli")) {
+            // İlk sipariş güvenlik onayı gerekiyor!
+            openFirstOrderPINModal(odemeYontemi);
         } else {
             alert(data.detail || "Hata oluştu.");
         }
     } catch (e) {
         alert("Sunucuya ulaşılamadı.");
+    }
+}
+
+// ==========================================
+// İLK SİPARİŞ 6 HANELİ GÜVENLİK KODU (PIN)
+// ==========================================
+let pendingPaymentMethod = null;
+
+function openFirstOrderPINModal(odemeYontemi) {
+    pendingPaymentMethod = odemeYontemi;
+    const modal = document.getElementById('firstOrderPINModal');
+    if (modal) modal.classList.add('active');
+    
+    const input = document.getElementById('securityPinInput');
+    if (input) {
+        input.value = '';
+        input.focus();
+    }
+}
+
+function closeFirstOrderPINModal() {
+    const modal = document.getElementById('firstOrderPINModal');
+    if (modal) modal.classList.remove('active');
+}
+
+function submitFirstOrderPIN() {
+    const input = document.getElementById('securityPinInput');
+    if (!input || !input.value || input.value.length < 6) {
+        alert("Lütfen 6 haneli güvenlik kodunu eksiksiz girin.");
+        return;
+    }
+    
+    state.currentTotpToken = input.value.trim();
+    closeFirstOrderPINModal();
+    
+    // Modal kapanınca siparişi otomatik tekrar dene
+    const actionBox = document.getElementById('checkoutActionBox');
+    if (actionBox) {
+        const originalHTML = actionBox.innerHTML;
+        actionBox.innerHTML = `<div style="text-align:center; padding:14px; font-weight:800; color:var(--primary); font-size:1rem;">⏳ Güvenlik Sağlandı, Sipariş Gönderiliyor...</div>`;
+        setTimeout(() => {
+            executeOrderSubmit(pendingPaymentMethod).then(() => {
+                closeModal('paymentCheckoutModal');
+                actionBox.innerHTML = originalHTML;
+            });
+        }, 800);
+    } else {
+        executeOrderSubmit(pendingPaymentMethod);
     }
 }
 

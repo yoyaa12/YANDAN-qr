@@ -113,6 +113,15 @@ class SiparisService:
             if not masa:
                 raise HTTPException(status_code=404, detail="Geçersiz masa ID!")
 
+            if masa.get('durum') == 'bos':
+                if not data.current_totp_token:
+                    raise HTTPException(status_code=403, detail="Masa şu an BOŞ. İlk siparişi vermek için lütfen masadaki ekranın altında yazan 6 haneli güvenlik kodunu okutun.")
+                
+                from app.core.totp_service import verify_dynamic_token
+                totp_secret = masa.get("totp_secret")
+                if not totp_secret or not verify_dynamic_token(data.masa_id, totp_secret, data.current_totp_token):
+                    raise HTTPException(status_code=403, detail="Geçersiz veya süresi dolmuş kod! Lütfen masadaki ekranda yazan güncel 6 haneli güvenlik kodunu girin.")
+
             siparis_kodu = f"SIP-{uuid.uuid4().hex[:6].upper()}"
             odeme_durumu, siparis_durumu = self._determine_initial_status(data.odeme_yontemi)
 

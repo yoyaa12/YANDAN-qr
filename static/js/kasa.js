@@ -1516,7 +1516,11 @@ window.showDynamicQRModal = async function (masaId) {
             const timerEl = document.getElementById("qrRemainingTimer");
             const linkEl = document.getElementById("modalQRLink");
 
-            const qrTargetUrl = window.location.origin + data.qr_url;
+            let baseOrigin = window.location.origin;
+            if (baseOrigin.includes("localhost") || baseOrigin.includes("127.0.0.1")) {
+                baseOrigin = "http://192.168.1.100:8000";
+            }
+            const qrTargetUrl = baseOrigin + data.qr_url;
             const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(qrTargetUrl)}`;
 
             if (qrImg) qrImg.src = qrApiUrl;
@@ -1533,7 +1537,11 @@ window.showDynamicQRModal = async function (masaId) {
         const res = await fetch(`/api/masalar/${masaId}/dynamic-qr`);
         const data = await res.json();
 
-        const qrTargetUrl = window.location.origin + data.qr_url;
+        let baseOrigin = window.location.origin;
+        if (baseOrigin.includes("localhost") || baseOrigin.includes("127.0.0.1")) {
+            baseOrigin = "http://192.168.1.100:8000";
+        }
+        const qrTargetUrl = baseOrigin + data.qr_url;
         const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(qrTargetUrl)}`;
 
         const modalHtml = `

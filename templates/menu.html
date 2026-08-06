@@ -8,6 +8,7 @@
     <title>Müşteri QR Menüsü</title>
     <link rel="stylesheet" href="/static/css/style.css?v=72">
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
 </head>
 
 <body>
@@ -286,6 +287,27 @@
         </div>
     </div>
 
+    <!-- İLK SİPARİŞ GÜVENLİK PIN MODALİ -->
+    <div id="firstOrderPINModal" class="modal-overlay">
+        <div class="modal-content" style="text-align: center; border-top: 4px solid var(--primary);">
+            <div style="font-size: 2.5rem; margin-bottom: 8px;">🔐</div>
+            <h2 style="font-size: 1.3rem; margin-bottom: 8px; color: var(--primary);">Masayı Onayla</h2>
+            <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 15px; line-height:1.4;">
+                İlk siparişinizi mutfağa iletebilmemiz için masadaki ekranın altında yazan <strong>6 haneli güvenlik kodunu</strong> giriniz.
+            </p>
+            
+            <input type="number" id="securityPinInput" placeholder="Örn: 123456" 
+                style="width: 100%; padding: 14px; font-size: 1.5rem; text-align: center; letter-spacing: 4px; font-weight: 800; background: rgba(0,0,0,0.2); border: 2px solid rgba(255,255,255,0.1); border-radius: 12px; color: #fff; margin-bottom: 15px; outline: none;">
+            
+            <button class="btn-add" style="width: 100%; justify-content: center; padding: 14px; font-size: 1.1rem; background: linear-gradient(135deg, var(--primary), #d97706); margin-bottom: 10px;" onclick="submitFirstOrderPIN()">
+                Onayla ve Siparişi Gönder
+            </button>
+            <button class="btn-add" style="width: 100%; justify-content: center; padding: 12px; font-size: 1rem; background: var(--surface-light); color:#fff;" onclick="closeFirstOrderPINModal()">
+                Vazgeç
+            </button>
+        </div>
+    </div>
+
     <!-- 4. GÜVENLİK (TOKEN) HATA MODALİ (KAPANMAZ) -->
     <div id="securityErrorModal" class="modal-overlay">
         <div class="modal-content" style="text-align: center; border-top: 4px solid var(--danger);">
@@ -297,7 +319,6 @@
     </div>
 
     <script src="/static/js/rulet.js?v=1"></script>
-    <script src="/static/js/app.js?v=64"></script>
+    <script src="/static/js/app.js?v=67"></script>
 </body>
-
 </html>
