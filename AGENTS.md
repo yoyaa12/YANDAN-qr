@@ -19,3 +19,12 @@ Bu dosya, yapay zekanın bu projede ve gelecek geliştirmelerde uyması gereken 
 ### 3. Veritabanı ve SQL Kuralları (Zorunlu)
 * **Kod İçine SQL Tablo/Migrasyon Yazma YASAĞI:** Projenin Python / Backend kodları içerisinde doğrudan SQL tablo oluşturma, şema değiştirme veya DDL/DML migrasyon sorguları yazılmayacaktır.
 * **Kullanıcı Onayı ve SQL İletimi:** Veritabanında yapılması gereken sorgular açıklanıp SQL metni olarak kullanıcıya verilecek, onay alınmadan ve kullanıcı çalıştırmadan veritabanı kodu projeye gömülmeyecektir.
+
+### 4. Geliştirme, Dürüstlük ve Test Zorunluluğu
+* **Test Edilmemiş Özellik Eklenmemiş Özelliktir:** Yapılan her yeni düzeltme (fix) veya özellik geliştirmesinden sonra mutlaka gerçek kod akışı ve senaryolar üzerinde dürüstçe test edilecektir.
+* **Dürüst Test Yorumu:** Yapılan testlerin neticeleri uydurma veya varsayımsal yorumlar yapılmadan, doğrudan elde edilen somut bulgulara dayanarak dürüstçe raporlanacaktır.
+* **Bilmediğini Kabullenme Prensipleri:** Emin olunmayan veya bilinmeyen bir durum olduğunda asla uydurma bilgi veya farazi varsayımlar yapılmayacak, kaynak kod ve loglar üzerinden doğrulanacaktır.
+
+### 5. Yazılım Mimarisi ve DTO / Response Kuralları (Zorunlu)
+* **Ayrı Response Objesi / DTO Kullanımı:** API yanıtlarında (Response) doğrudan veritabanı entity'leri veya iç Pydantic modelleri döndürülmeyecektir. Gereğinden fazla veya hassas bilgi gönderimini engellemek amacıyla sadece gerekli alanları içeren ayrı Response DTO / Pydantic modelleri kullanılacaktır.
+* **Katmanlı Mimari ve Dependency Injection:** Kod yapısı Controller (Router/API), Service (İş Mantığı) ve DB (Repository/Veri Erişim) katmanlarına kesin olarak ayrılacak; katmanlar arasındaki bağımlılıklar Dependency Injection (Bağımlılık Enjeksiyonu) üzerinden yönetilecektir.

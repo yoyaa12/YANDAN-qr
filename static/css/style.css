@@ -53,8 +53,7 @@
     background: transparent;
     display: none;
 }
-    -webkit-tap-highlight-color: transparent;
-}
+
 
 /* Number Input'lardaki sağdaki ok (spinner) tuşlarını gizle */
 input::-webkit-outer-spin-button,
@@ -817,12 +816,15 @@ textarea:focus {
     0% {
         transform: translateX(-50%) scale(0.92);
     }
+
     50% {
         transform: translateX(-50%) scale(1.08);
     }
+
     75% {
         transform: translateX(-50%) scale(1.02);
     }
+
     100% {
         transform: translateX(-50%) scale(1);
     }
@@ -2786,4 +2788,65 @@ body.vega-kasa-body {
     height: 0 !important;
     background: transparent !important;
 }
-
+
+/* MASA TAŞIMA BİLDİRİM VE ANİMASYON STİLLERİ (60 FPS MOBİL PERFORMANSLI) */
+@keyframes tableBadgePulse {
+    0% {
+        transform: scale(1);
+        background-color: rgba(99, 102, 241, 0.2);
+    }
+
+    50% {
+        transform: scale(1.18);
+        background-color: #6366f1;
+        color: #ffffff;
+    }
+
+    100% {
+        transform: scale(1);
+        background-color: rgba(99, 102, 241, 0.2);
+    }
+}
+
+.table-badge.badge-pulse {
+    animation: tableBadgePulse 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275) 3;
+    border-color: #818cf8 !important;
+}
+
+@keyframes spinTransferIcon {
+    0% {
+        transform: rotate(0deg) scale(0.8);
+        opacity: 0.5;
+    }
+
+    50% {
+        transform: rotate(180deg) scale(1.2);
+        opacity: 1;
+    }
+
+    100% {
+        transform: rotate(360deg) scale(1);
+        opacity: 1;
+    }
+}
+
+.transfer-icon-animated {
+    display: inline-block;
+    animation: spinTransferIcon 0.8s ease-out 1;
+}
+
+.table-transfer-modal-content {
+    animation: modalPopIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes modalPopIn {
+    0% {
+        transform: scale(0.85);
+        opacity: 0;
+    }
+
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}

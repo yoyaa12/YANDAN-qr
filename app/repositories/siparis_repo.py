@@ -59,7 +59,7 @@ class SiparisRepository:
             SELECT s.*, m.masa_no 
             FROM Siparisler s 
             JOIN Masalar m ON s.masa_id = m.id 
-            WHERE s.masa_id = ? AND m.durum != 'bos' AND s.siparis_durumu NOT IN ('iptal', 'odendi_kapatildi')
+            WHERE s.masa_id = ? AND s.siparis_durumu NOT IN ('iptal', 'odendi_kapatildi')
             ORDER BY s.id ASC
         """
         return self.db.execute_query(query, (masa_id,)) or []

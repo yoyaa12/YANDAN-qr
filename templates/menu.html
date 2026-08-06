@@ -267,6 +267,25 @@
         </div>
     </div>
 
+    <!-- MASA DEĞİŞİKLİĞİ BİLDİRİM MODALİ -->
+    <div id="tableTransferModal" class="modal-overlay">
+        <div class="modal-content table-transfer-modal-content" style="text-align: center; border-top: 4px solid #6366f1;">
+            <div class="transfer-icon-animated" style="font-size: 3.2rem; margin-bottom: 12px;">🔄</div>
+            <h2 style="font-size: 1.4rem; font-weight: 800; margin-bottom: 8px; color: #fff;">Masanız Taşındı!</h2>
+            <p id="tableTransferMessage" style="color: var(--text-secondary); font-size: 0.95rem; margin-bottom: 16px; line-height: 1.5;">
+                Oturumunuz ve tüm adisyon siparişleriniz yeni masanıza aktarıldı.
+            </p>
+            <div class="table-transfer-badge-box" style="display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 20px; background: rgba(99, 102, 241, 0.15); padding: 12px; border-radius: var(--radius-md); border: 1px dashed rgba(99, 102, 241, 0.4);">
+                <span id="transferFromBadge" style="font-weight: 700; color: #94a3b8; font-size: 1.05rem; text-decoration: line-through;">Masa 1</span>
+                <span style="font-size: 1.2rem;">➡️</span>
+                <span id="transferToBadge" style="font-weight: 900; color: #818cf8; font-size: 1.25rem;">Masa 2</span>
+            </div>
+            <button class="btn-add" style="width: 100%; justify-content: center; padding: 12px; font-size: 1rem; background: linear-gradient(135deg, #6366f1, #4f46e5);" onclick="closeModal('tableTransferModal')">
+                Anladım 👍
+            </button>
+        </div>
+    </div>
+
     <!-- 4. GÜVENLİK (TOKEN) HATA MODALİ (KAPANMAZ) -->
     <div id="securityErrorModal" class="modal-overlay">
         <div class="modal-content" style="text-align: center; border-top: 4px solid var(--danger);">

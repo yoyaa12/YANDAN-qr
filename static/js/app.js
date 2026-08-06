@@ -255,7 +255,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     socket.on('durum_guncellendi', (data) => {
         if (data && data.from_masa_id && parseInt(data.from_masa_id) === parseInt(state.masaId)) {
-            checkActiveOrder();
+            handleTableMove(data.from_masa_id, data.to_masa_id, data.to_masa_no, data.from_masa_no);
             return;
         }
         if (data && data.is_move) return;
@@ -314,25 +314,67 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     socket.on('masa_tasindi', (data) => {
         if (data && parseInt(data.from_masa_id) === parseInt(state.masaId)) {
-            state.masaId = parseInt(data.to_masa_id);
-            state.masaNo = data.to_masa_no || `Masa ${data.to_masa_id}`;
+            handleTableMove(data.from_masa_id, data.to_masa_id, data.to_masa_no, data.from_masa_no);
+        }
+    });
 
-            const url = new URL(window.location.href);
-            url.searchParams.set('masa', state.masaId);
-            window.history.replaceState({}, '', url);
+    // Otomatik Masa Taşıma Kontrolü (Socket harici 3 saniyelik periyodik canlı kontrol)
+    setInterval(() => {
+        if (state.masaId) {
+            checkActiveOrder();
+        }
+    }, 3000);
 
-            const masaBadge = document.getElementById('tableBadge');
-            if (masaBadge) {
-                const shortNo = formatShortMasaNo(state.masaNo);
-                masaBadge.innerHTML = `🪑 ${shortNo}`;
-                masaBadge.title = state.masaNo;
-            }
-
-            showToast(`Adisyonunuz ${state.masaNo} masasına taşındı.`);
+    // Sekme/Ekran tekrar aktif olduğunda kontrol et
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden && state.masaId) {
             checkActiveOrder();
         }
     });
 });
+
+window.handleTableMove = function (fromMasaId, toMasaId, toMasaNo, fromMasaNo) {
+    if (!toMasaId) return;
+
+    const isAlreadyOnNewTable = parseInt(toMasaId) === parseInt(state.masaId);
+    const modalIsActive = document.getElementById('tableTransferModal')?.classList.contains('active');
+
+    if (isAlreadyOnNewTable && modalIsActive) {
+        return;
+    }
+
+    const oldMasaNo = fromMasaNo || state.masaNo || `Masa ${fromMasaId}`;
+    state.masaId = parseInt(toMasaId);
+    state.masaNo = toMasaNo || `Masa ${toMasaId}`;
+
+    const url = new URL(window.location.href);
+    url.searchParams.set('masa', state.masaId);
+    window.history.replaceState({}, '', url);
+
+    if (socket && socket.connected) {
+        socket.emit('musteri_oturdu', { masa_id: state.masaId, masa_no: state.masaNo });
+    }
+
+    const masaBadge = document.getElementById('tableBadge');
+    if (masaBadge) {
+        const shortNo = formatShortMasaNo(state.masaNo);
+        masaBadge.innerHTML = `🪑 ${shortNo}`;
+        masaBadge.title = state.masaNo;
+        masaBadge.classList.remove('badge-pulse');
+        void masaBadge.offsetWidth;
+        masaBadge.classList.add('badge-pulse');
+    }
+
+    const fromBadgeEl = document.getElementById('transferFromBadge');
+    const toBadgeEl = document.getElementById('transferToBadge');
+    const transferModal = document.getElementById('tableTransferModal');
+    if (fromBadgeEl) fromBadgeEl.innerText = formatShortMasaNo(oldMasaNo);
+    if (toBadgeEl) toBadgeEl.innerText = formatShortMasaNo(state.masaNo);
+    if (transferModal) transferModal.classList.add('active');
+
+    playNotificationSound();
+    showToast(`🔄 Adisyonunuz ve oturumunuz ${state.masaNo} masasına taşındı.`);
+};
 
 // AKICI VE KESİNTİSİZ NATIVE KATEGORİ KAYDIRMA SİSTEMİ (INTERSECTION OBSERVER)
 let categoryObserver = null;
@@ -422,21 +464,11 @@ async function checkActiveOrder() {
         const data = await res.json();
 
         if (data.redirect_masa_id && parseInt(data.redirect_masa_id) !== parseInt(state.masaId)) {
-            state.masaId = parseInt(data.redirect_masa_id);
-            state.masaNo = data.redirect_masa_no || `Masa ${data.redirect_masa_id}`;
-
-            const url = new URL(window.location.href);
-            url.searchParams.set('masa', state.masaId);
-            window.history.replaceState({}, '', url);
-
-            const masaBadge = document.getElementById('tableBadge');
-            if (masaBadge) {
-                const shortNo = formatShortMasaNo(state.masaNo);
-                masaBadge.innerHTML = `🪑 ${shortNo}`;
-                masaBadge.title = state.masaNo;
-            }
-
-            showToast(`Adisyonunuz ${state.masaNo} masasına taşındı.`);
+            const fromId = state.masaId;
+            const toId = parseInt(data.redirect_masa_id);
+            const toNo = data.redirect_masa_no || `Masa ${toId}`;
+            handleTableMove(fromId, toId, toNo);
+            return;
         }
 
         if (data.has_active && (data.siparisler && data.siparisler.length > 0 || data.siparis)) {
@@ -1294,7 +1326,7 @@ function formatOrderTime(val) {
 }
 
 let expandedGroupDetailsMap = {};
-window.toggleGroupDetails = function(key) {
+window.toggleGroupDetails = function (key) {
     expandedGroupDetailsMap[key] = !expandedGroupDetailsMap[key];
     renderOrderTrackingUI();
 };

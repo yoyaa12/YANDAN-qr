@@ -265,6 +265,14 @@ window.selectKasaMasa = function (tableId) {
         return;
     }
     activeMasaId = tableId;
+    discountValue = 0;
+    isHalfModeSelected = false;
+
+    const nakitEl = document.getElementById('tutarNakitInput');
+    const kartEl = document.getElementById('tutarKartInput');
+    if (nakitEl) nakitEl.value = '';
+    if (kartEl) kartEl.value = '';
+
     const viewGrid = document.getElementById('viewMasaHaritasi');
     const viewDetay = document.getElementById('viewMasaDetay');
 
@@ -280,6 +288,14 @@ window.selectKasaMasa = function (tableId) {
 
 window.closeMasaDetayView = function () {
     activeMasaId = null;
+    discountValue = 0;
+    isHalfModeSelected = false;
+
+    const nakitEl = document.getElementById('tutarNakitInput');
+    const kartEl = document.getElementById('tutarKartInput');
+    if (nakitEl) nakitEl.value = '';
+    if (kartEl) kartEl.value = '';
+
     const viewGrid = document.getElementById('viewMasaHaritasi');
     const viewDetay = document.getElementById('viewMasaDetay');
 
@@ -373,13 +389,16 @@ function renderActiveTicketWorkstation() {
     let grandTotalSum = 0;
     let alreadyPaidSum = 0;
 
-    if (allMasaOrders.length === 0) {
+    if (allMasaOrders.length === 0 || openMasaOrders.length === 0 || table.durum === 'bos') {
+        currentTableItems = [];
         if (metaEl) {
             metaEl.innerHTML = `<span>Açık Sipariş Bulunmuyor</span>`;
         }
         if (tbody) {
             tbody.innerHTML = `<div class="vega-empty-ticket" style="text-align:center; padding:40px 20px; color:var(--text-muted);"><div style="font-size:2.5rem; margin-bottom:8px;">🍽️</div><div>Bu masaya ait sipariş bulunmuyor.</div></div>`;
         }
+        updateFinancialSummary(0, 0);
+        return;
     } else {
         const modeSelectorHtml = `
             <div style="display:flex; gap:8px; margin-bottom:12px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:8px;">
@@ -408,191 +427,159 @@ function renderActiveTicketWorkstation() {
                     }
                 }
 
-                (o.detaylar || []).forEach((d, idx) => {
-                    const lineTotal = parseFloat(d.ara_toplam) || ((parseFloat(d.adet) || 0) * (parseFloat(d.birim_fiyat) || 0));
-                    const uniqueId = `${o.id}_${idx}`;
-                    const isIkramNow = (uniqueId in ikramStateMap) ? ikramStateMap[uniqueId] : (d.is_ikram || false);
-                    const gKey = `${d.urun_id}_${(d.urun_notu || '').trim().toLowerCase()}`;
-
-                    if (!isIkramNow) {
-                        grandTotalSum += lineTotal;
-                        if (isOrderPaid) {
-                            alreadyPaidSum += lineTotal;
-                        }
-                    }
-
-                    currentTableItems.push({
-                        uniqueId: uniqueId,
-                        siparis_id: o.id,
-                        urun_id: d.urun_id,
-                        urun_adi: d.urun_adi,
-                        adet: parseInt(d.adet) || 1,
-                        birim_fiyat: parseFloat(d.birim_fiyat) || 0,
-                        ara_toplam: lineTotal,
-                        urun_notu: d.urun_notu || '',
-                        isIkram: isIkramNow,
-                        isPaid: isOrderPaid,
-                        selected: !!selectedStateMap[uniqueId]
-                    });
-
-                    if (!groupedMap[gKey]) {
-                        groupedMap[gKey] = {
-                            gKey: gKey,
+                (o.detaylar || []).forEach(d => {
+                    const groupKey = `${d.urun_id}_${d.birim_fiyat}_${(d.urun_notu || '').trim().toLowerCase()}`;
+                    if (!groupedMap[groupKey]) {
+                        groupedMap[groupKey] = {
                             urun_id: d.urun_id,
                             urun_adi: d.urun_adi,
-                            urun_notu: d.urun_notu || '',
                             birim_fiyat: parseFloat(d.birim_fiyat) || 0,
-                            total_adet: 0,
-                            total_tutar: 0,
+                            urun_notu: d.urun_notu || '',
+                            toplam_adet: 0,
+                            toplam_ara: 0,
                             paid_adet: 0,
-                            paid_tutar: 0,
                             unpaid_adet: 0,
-                            unpaid_tutar: 0,
-                            breakdowns: []
+                            orders_list: []
                         };
                     }
+                    const adet = parseInt(d.adet) || 1;
+                    const ara = parseFloat(d.ara_toplam) || (adet * parseFloat(d.birim_fiyat) || 0);
 
-                    groupedMap[gKey].total_adet += (parseInt(d.adet) || 1);
-                    if (!isIkramNow) {
-                        groupedMap[gKey].total_tutar += lineTotal;
-                        if (isOrderPaid) {
-                            groupedMap[gKey].paid_adet += (parseInt(d.adet) || 1);
-                            groupedMap[gKey].paid_tutar += lineTotal;
-                        } else {
-                            groupedMap[gKey].unpaid_adet += (parseInt(d.adet) || 1);
-                            groupedMap[gKey].unpaid_tutar += lineTotal;
-                        }
+                    groupedMap[groupKey].toplam_adet += adet;
+                    groupedMap[groupKey].toplam_ara += ara;
+
+                    if (isOrderPaid) {
+                        groupedMap[groupKey].paid_adet += adet;
+                    } else {
+                        groupedMap[groupKey].unpaid_adet += adet;
                     }
 
-                    groupedMap[gKey].breakdowns.push({
+                    groupedMap[groupKey].orders_list.push({
                         siparis_id: o.id,
-                        siparis_kodu: o.siparis_kodu || '',
-                        time_str: timeStr,
-                        adet: parseInt(d.adet) || 1,
-                        line_total: isIkramNow ? 0 : lineTotal,
-                        is_paid: isOrderPaid,
-                        is_ikram: isIkramNow
+                        timeStr: timeStr,
+                        garson_adi: o.garson_adi || 'Müşteri QR',
+                        adet: adet,
+                        ara: ara,
+                        isPaid: isOrderPaid
                     });
                 });
             });
 
-            let groupedRowsHtml = '';
-            Object.values(groupedMap).forEach((g) => {
-                const isExpanded = !!expandedGroupDetailsMap[g.gKey];
-                const hasMixedPayment = g.paid_adet > 0 && g.unpaid_adet > 0;
-                const isAllPaid = g.paid_adet > 0 && g.unpaid_adet === 0;
+            let itemIndex = 0;
+            let rowsHtml = '';
 
-                let statusBadge = '';
-                if (hasMixedPayment) {
-                    statusBadge = `<span style="background:rgba(245,158,11,0.2); color:#fbbf24; border:1px solid rgba(245,158,11,0.4); padding:2px 6px; border-radius:6px; font-size:0.72rem; font-weight:800;">⚡ PARÇALI ÖDENMİŞ (${g.paid_adet} Kart / ${g.unpaid_adet} Kasa)</span>`;
-                } else if (isAllPaid) {
-                    statusBadge = `<span style="background:rgba(16,185,129,0.2); color:#34d399; border:1px solid rgba(16,185,129,0.4); padding:2px 6px; border-radius:6px; font-size:0.72rem; font-weight:800;">✅ TÜMÜ ÖDENDİ (POS)</span>`;
+            Object.keys(groupedMap).forEach(key => {
+                const grp = groupedMap[key];
+                const uniqueId = `item_grp_${grp.urun_id}_${itemIndex}`;
+                const wasSelected = selectedStateMap[uniqueId] || false;
+                const wasIkram = ikramStateMap[uniqueId] || false;
+
+                const itemObj = {
+                    index: itemIndex,
+                    uniqueId: uniqueId,
+                    urun_id: grp.urun_id,
+                    urun_adi: grp.urun_adi,
+                    adet: grp.toplam_adet,
+                    birim_fiyat: grp.birim_fiyat,
+                    ara_toplam: grp.toplam_ara,
+                    unpaid_adet: grp.unpaid_adet,
+                    paid_adet: grp.paid_adet,
+                    selected: wasSelected,
+                    isIkram: wasIkram
+                };
+                currentTableItems.push(itemObj);
+
+                if (grp.unpaid_adet > 0) {
+                    if (!wasIkram) grandTotalSum += grp.toplam_ara;
                 } else {
-                    statusBadge = `<span style="background:rgba(99,102,241,0.15); color:#a5b4fc; border:1px solid rgba(99,102,241,0.3); padding:2px 6px; border-radius:6px; font-size:0.72rem; font-weight:800;">⏳ KASADA ÖDENECEK</span>`;
+                    alreadyPaidSum += grp.toplam_ara;
                 }
 
-                let detailSublines = g.breakdowns.map(b => `
-                    <div class="detail-subline ${b.is_paid ? 'paid-line' : 'unpaid-line'}">
-                        <span>
-                            ${b.is_paid ? '🟢' : '🟡'} <strong>${b.adet} Adet</strong> — 
-                            ${b.is_paid ? '💳 Kredi Kartı / QR POS (Ödendi)' : '💵 Kasada Tahsil Edilecek'}
-                            ${b.time_str ? `<span style="opacity:0.85; margin-left:6px;">⏰ Saat: ${b.time_str}</span>` : ''}
-                            <span style="opacity:0.7; margin-left:4px;">(Fiş #${b.siparis_id})</span>
-                        </span>
-                        <strong>${b.line_total.toFixed(2)} ₺</strong>
-                    </div>
-                `).join('');
+                let sublinesHtml = '';
+                grp.orders_list.forEach(sub => {
+                    sublinesHtml += `
+                        <div class="detail-subline ${sub.isPaid ? 'paid-line' : 'unpaid-line'}">
+                            <span>📦 Fiş #${sub.siparis_id} ${sub.timeStr ? `(${sub.timeStr})` : ''} - ${sub.garson_adi}: ${sub.adet} Adet</span>
+                            <strong>${sub.ara.toFixed(2)} ₺ ${sub.isPaid ? '✅ (Ödendi)' : '⏳ (Açık)'}</strong>
+                        </div>
+                    `;
+                });
 
-                groupedRowsHtml += `
-                    <tr class="ticket-row-clickable">
-                        <td>
-                            <div style="display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
-                                <strong style="color:#fff; font-size:1.05rem;">${g.urun_adi}</strong>
-                                ${statusBadge}
-                                <button id="btnAyrintilar_${g.gKey}" type="button" class="btn-ayrintilar-chip" onclick="toggleGroupDetails('${g.gKey}', event)">
-                                    ${isExpanded ? '▲ Gizle' : '🔍 Ayrıntılar'}
-                                </button>
+                const isExpanded = expandedGroupDetailsMap[key] || false;
+
+                rowsHtml += `
+                    <tr class="ticket-row-clickable ${wasSelected ? 'selected-row' : ''}" onclick="toggleRowSelection(${itemIndex})">
+                        <td style="padding:10px 8px;">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <input type="checkbox" ${wasSelected ? 'checked' : ''} onclick="event.stopPropagation(); toggleRowSelection(${itemIndex})" style="width:18px; height:18px; cursor:pointer;">
+                                <div>
+                                    <strong style="color:#fff; font-size:0.95rem;">${grp.urun_adi}</strong>
+                                    ${grp.urun_notu ? `<div style="font-size:0.75rem; color:#f59e0b; font-style:italic;">📝 ${grp.urun_notu}</div>` : ''}
+                                    <button type="button" id="btnAyrintilar_${key}" class="btn-ayrintilar-chip" onclick="toggleGroupDetails('${key}', event)">
+                                        ${isExpanded ? '▲ Gizle' : '🔍 Ayrıntılar'}
+                                    </button>
+                                </div>
                             </div>
-                            ${g.urun_notu ? `<div style="font-size:0.78rem; color:var(--text-secondary); margin-top:2px;">Not: ${g.urun_notu}</div>` : ''}
-
-                            <div id="groupDetails_${g.gKey}" class="grouped-details-box" style="display: ${isExpanded ? 'block' : 'none'};">
-                                <div class="grouped-details-header">📊 Sipariş Saatleri & Parçalı Ödeme Kırılımı:</div>
-                                ${detailSublines}
+                            <div id="groupDetails_${key}" class="grouped-details-box" style="display:${isExpanded ? 'block' : 'none'};">
+                                <div class="grouped-details-header">📋 Fiş & Zaman Ayrıntıları:</div>
+                                ${sublinesHtml}
                             </div>
                         </td>
-                        <td style="text-align: center; font-weight:900; color:#fff; font-size:1.1rem;">${g.total_adet}</td>
-                        <td style="text-align: right; color:#94a3b8;">${g.birim_fiyat.toFixed(2)} ₺</td>
-                        <td style="text-align: right; font-weight:900; color:#fbbf24; font-size:1.1rem;">${g.total_tutar.toFixed(2)} ₺</td>
+                        <td style="text-align:center; font-weight:800; font-size:1rem; color:#cbd5e1;">${grp.toplam_adet}</td>
+                        <td style="text-align:right; font-weight:700; color:#cbd5e1;">${grp.birim_fiyat.toFixed(2)} ₺</td>
+                        <td style="text-align:right;">
+                            ${wasIkram ? `<span style="background:rgba(239,68,68,0.2); color:#f87171; padding:2px 6px; border-radius:4px; font-weight:800; font-size:0.75rem;">🎁 İKRAM</span>` : `<span style="color:#64748b;">-</span>`}
+                        </td>
+                        <td style="text-align:right; font-weight:900; font-size:1.05rem; color:${wasIkram ? '#f87171' : '#34d399'};">
+                            ${wasIkram ? '0.00 ₺' : `${grp.toplam_ara.toFixed(2)} ₺`}
+                        </td>
                     </tr>
                 `;
+                itemIndex++;
             });
 
-            const contentTable = `
+            const tableHtml = `
                 ${modeSelectorHtml}
-                <div class="batch-card" style="background: rgba(15, 23, 42, 0.85); border: 1.5px solid rgba(255, 255, 255, 0.12); border-radius: 12px; padding: 14px; box-shadow: 0 4px 14px rgba(0,0,0,0.3);">
-                    <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:8px; margin-bottom:12px;">
-                        <span style="font-size:1.05rem; font-weight:800; color:#fbbf24;">🧾 MASANIN TÜM ÜRÜNLERİ (GRUPLANMIŞ ADİSYON)</span>
-                        <span style="font-size:0.8rem; color:#cbd5e1;">Toplam: <strong>${Object.keys(groupedMap).length} Çeşit Ürün</strong></span>
-                    </div>
-                    <table class="vega-ticket-table" style="width:100%;">
-                        <thead>
-                            <tr>
-                                <th>Ürün Adı & Ayrıntılar</th>
-                                <th style="text-align: center; width: 70px;">Adet</th>
-                                <th style="text-align: right; width: 100px;">Birim Fiyat</th>
-                                <th style="text-align: right; width: 110px;">Toplam</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${groupedRowsHtml}
-                        </tbody>
-                    </table>
-                </div>
+                <table class="vega-ticket-table" style="width:100%;">
+                    <thead>
+                        <tr>
+                            <th>Ürün Adı & Ayrıntılar</th>
+                            <th style="text-align:center; width:50px;">Adet</th>
+                            <th style="text-align:right; width:90px;">Fiyat</th>
+                            <th style="text-align:right; width:80px;">Durum</th>
+                            <th style="text-align:right; width:90px;">Toplam</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rowsHtml}
+                    </tbody>
+                </table>
             `;
-            if (tbody) tbody.innerHTML = contentTable;
 
+            if (tbody) tbody.innerHTML = tableHtml;
         } else {
             let batchesHtml = modeSelectorHtml;
+
             allMasaOrders.forEach((o) => {
-                let batchTotal = 0;
                 let itemsRows = '';
+                let batchTotal = 0;
 
-                (o.detaylar || []).forEach((d, idx) => {
-                    const lineTotal = parseFloat(d.ara_toplam) || ((parseFloat(d.adet) || 0) * (parseFloat(d.birim_fiyat) || 0));
-                    const uniqueId = `${o.id}_${idx}`;
-                    const isIkramNow = (uniqueId in ikramStateMap) ? ikramStateMap[uniqueId] : (d.is_ikram || false);
-
-                    if (!isIkramNow) {
-                        batchTotal += lineTotal;
-                        grandTotalSum += lineTotal;
-                        if (o.odeme_durumu === 'odendi') alreadyPaidSum += lineTotal;
-                    }
-
-                    currentTableItems.push({
-                        uniqueId: uniqueId,
-                        siparis_id: o.id,
-                        urun_adi: d.urun_adi,
-                        adet: parseInt(d.adet) || 1,
-                        birim_fiyat: parseFloat(d.birim_fiyat) || 0,
-                        ara_toplam: lineTotal,
-                        urun_notu: d.urun_notu || '',
-                        isIkram: isIkramNow,
-                        isPaid: (o.odeme_durumu === 'odendi'),
-                        selected: !!selectedStateMap[uniqueId]
-                    });
+                (o.detaylar || []).forEach(d => {
+                    const adet = parseInt(d.adet) || 1;
+                    const bFiyat = parseFloat(d.birim_fiyat) || 0;
+                    const ara = parseFloat(d.ara_toplam) || (adet * bFiyat);
+                    batchTotal += ara;
 
                     itemsRows += `
-                        <tr class="ticket-row-clickable ${selectedStateMap[uniqueId] ? 'selected-row' : ''} ${isIkramNow ? 'ikram-row' : ''}">
+                        <tr>
                             <td>
-                                <strong style="color:#fff;">${d.urun_adi}</strong>
-                                ${d.urun_notu ? `<div style="font-size:0.75rem; color:var(--text-secondary);">${d.urun_notu}</div>` : ''}
+                                <strong>${d.urun_adi}</strong>
+                                ${d.urun_notu ? `<div style="font-size:0.75rem; color:#f59e0b;">Not: ${d.urun_notu}</div>` : ''}
                             </td>
-                            <td style="text-align: center; font-weight:800; color:#fff;">${d.adet}</td>
-                            <td style="text-align: right; color:#94a3b8;">${parseFloat(d.birim_fiyat).toFixed(2)} ₺</td>
-                            <td style="text-align: right; font-weight:700;">
-                                ${isIkramNow ? `<span style="color:#ef4444; background:rgba(239,68,68,0.15); padding:2px 6px; border-radius:4px;">🎁 İKRAM (0 ₺)</span>` : '-'}
-                            </td>
-                            <td style="text-align: right; font-weight:800; color:#fbbf24;">${isIkramNow ? '0.00 ₺' : lineTotal.toFixed(2) + ' ₺'}</td>
+                            <td style="text-align:center;">${adet}</td>
+                            <td style="text-align:right;">${bFiyat.toFixed(2)} ₺</td>
+                            <td style="text-align:right; color:#64748b;">-</td>
+                            <td style="text-align:right; font-weight:800; color:#34d399;">${ara.toFixed(2)} ₺</td>
                         </tr>
                     `;
                 });
@@ -669,8 +656,16 @@ function renderActiveTicketWorkstation() {
 
 function getActiveMasaSubtotal() {
     const table = kasaTables.find(t => t.id == activeMasaId);
-    if (!table) return 0;
-    const masaOrders = kasaOrders.filter(o => o.masa_id == table.id && o.siparis_durumu !== 'iptal');
+    if (!table || table.durum === 'bos') return 0;
+    
+    const openMasaOrders = kasaOrders.filter(o => 
+        o.masa_id == table.id && 
+        o.odeme_durumu !== 'odendi' && 
+        o.siparis_durumu !== 'iptal' && 
+        o.siparis_durumu !== 'odendi_kapatildi'
+    );
+
+    if (openMasaOrders.length === 0) return 0;
 
     let itemsTotalSum = 0;
     currentTableItems.forEach(item => {
@@ -680,7 +675,7 @@ function getActiveMasaSubtotal() {
     });
 
     let orderTotalSum = 0;
-    masaOrders.forEach(o => {
+    openMasaOrders.forEach(o => {
         orderTotalSum += parseFloat(o.toplam_tutar) || 0;
     });
 
@@ -688,10 +683,14 @@ function getActiveMasaSubtotal() {
 }
 
 function updateFinancialSummary(subtotal, alreadyPaidFromOrders = 0) {
-    const subtotalVal = subtotal > 0 ? subtotal : getActiveMasaSubtotal();
+    const table = kasaTables.find(t => t.id == activeMasaId);
+    let subtotalVal = 0;
+    if (table && table.durum !== 'bos') {
+        subtotalVal = subtotal > 0 ? subtotal : getActiveMasaSubtotal();
+    }
 
     let calculatedDiscount = 0;
-    if (discountValue > 0) {
+    if (subtotalVal > 0 && discountValue > 0) {
         if (discountType === 'percent') {
             calculatedDiscount = (subtotalVal * discountValue) / 100;
         } else {
@@ -699,7 +698,7 @@ function updateFinancialSummary(subtotal, alreadyPaidFromOrders = 0) {
         }
     }
 
-    const manualPartialPaid = activeMasaId ? (parseFloat(partialPaymentsMap[activeMasaId]) || 0) : 0;
+    const manualPartialPaid = (activeMasaId && subtotalVal > 0) ? (parseFloat(partialPaymentsMap[activeMasaId]) || 0) : 0;
     const paidBefore = alreadyPaidFromOrders + manualPartialPaid;
 
     const toplamVal = Math.max(0, subtotalVal);
@@ -722,7 +721,7 @@ function updateFinancialSummary(subtotal, alreadyPaidFromOrders = 0) {
 
     if (elToplam) elToplam.innerText = `${toplamVal.toFixed(2)} ₺`;
     if (rowDiscountDetail) {
-        if (discountValue > 0) {
+        if (discountValue > 0 && subtotalVal > 0) {
             rowDiscountDetail.style.visibility = 'visible';
             if (elDiscount) elDiscount.innerText = `${calculatedDiscount.toFixed(2)} ₺ (${discountType === 'percent' ? '%' + discountValue : 'Sabit'})`;
         } else {
@@ -742,7 +741,7 @@ function updateFinancialSummary(subtotal, alreadyPaidFromOrders = 0) {
     }
 
     if (rowSecimDetail) {
-        if (secimVal > 0) {
+        if (secimVal > 0 && subtotalVal > 0) {
             rowSecimDetail.style.visibility = 'visible';
             if (elSecim) elSecim.innerText = `${secimVal.toFixed(2)} ₺`;
         } else {

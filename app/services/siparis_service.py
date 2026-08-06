@@ -107,17 +107,11 @@ class SiparisService:
 
         with db_transaction():
             if data.masa_id in TABLE_MOVES_MAP:
-                target_id = TABLE_MOVES_MAP[data.masa_id]
-                target_masa = self.masa_repo.get_by_id(target_id)
-                if target_masa and target_masa.get("durum") != "bos":
-                    data.masa_id = target_id
+                data.masa_id = TABLE_MOVES_MAP[data.masa_id]
 
             masa = self.masa_repo.get_by_id(data.masa_id)
             if not masa:
                 raise HTTPException(status_code=404, detail="Geçersiz masa ID!")
-
-            if masa.get("durum") == "bos":
-                self.siparis_repo.clear_active_orders_for_masa(data.masa_id)
 
             siparis_kodu = f"SIP-{uuid.uuid4().hex[:6].upper()}"
             odeme_durumu, siparis_durumu = self._determine_initial_status(data.odeme_yontemi)
@@ -171,11 +165,8 @@ class SiparisService:
         is_redirected = False
 
         if masa_id in TABLE_MOVES_MAP:
-            moved_to = TABLE_MOVES_MAP[masa_id]
-            target_table = self.masa_repo.get_by_id(moved_to)
-            if target_table and target_table.get("durum") != "bos":
-                target_masa_id = moved_to
-                is_redirected = True
+            target_masa_id = TABLE_MOVES_MAP[masa_id]
+            is_redirected = True
 
         siparisler = self.siparis_repo.get_all_active_by_masa_id(target_masa_id)
         if siparisler:
@@ -187,12 +178,14 @@ class SiparisService:
                 "siparis": s_dtos[-1].model_dump(),
                 "genel_toplam": genel_toplam
             }
-            if is_redirected:
-                t_table = self.masa_repo.get_by_id(target_masa_id)
-                res["redirect_masa_id"] = target_masa_id
-                res["redirect_masa_no"] = t_table.get("masa_no", f"Masa {target_masa_id}") if t_table else f"Masa {target_masa_id}"
-            return res
-        return {"has_active": False, "siparisler": [], "siparis": None, "genel_toplam": 0.0}
+        else:
+            res = {"has_active": False, "siparisler": [], "siparis": None, "genel_toplam": 0.0}
+
+        if is_redirected:
+            t_table = self.masa_repo.get_by_id(target_masa_id)
+            res["redirect_masa_id"] = target_masa_id
+            res["redirect_masa_no"] = t_table.get("masa_no", f"Masa {target_masa_id}") if t_table else f"Masa {target_masa_id}"
+        return res
 
     async def update_siparis_durumu(self, siparis_id: int, data: DurumGuncelleModel) -> SiparisDurumResponse:
         yeni_durum = data.yeni_durum.lower()
@@ -294,6 +287,8 @@ class SiparisService:
     async def move_masa(self, from_masa_id: int, to_masa_id: int):
         with db_transaction():
             self.siparis_repo.move_orders_between_masalar(from_masa_id, to_masa_id)
+            from_masa = self.masa_repo.get_by_id(from_masa_id)
+            from_masa_no = from_masa.get("masa_no", f"Masa {from_masa_id}") if from_masa else f"Masa {from_masa_id}"
             to_masa = self.masa_repo.get_by_id(to_masa_id)
             to_masa_no = to_masa.get("masa_no", f"Masa {to_masa_id}") if to_masa else f"Masa {to_masa_id}"
             
@@ -303,7 +298,8 @@ class SiparisService:
             TABLE_MOVES_MAP[from_masa_id] = to_masa_id
         
         event_payload = {
-            "from_masa_id": from_masa_id, 
+            "from_masa_id": from_masa_id,
+            "from_masa_no": from_masa_no,
             "to_masa_id": to_masa_id,
             "to_masa_no": to_masa_no,
             "is_move": True
