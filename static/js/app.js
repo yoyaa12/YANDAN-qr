@@ -641,14 +641,29 @@ function renderProductCardHTML(prod) {
     const inCartQty = cartItems.reduce((sum, item) => sum + item.adet, 0);
     const isSelected = inCartQty > 0;
 
+    const stock = (prod.stok_miktari !== undefined && prod.stok_miktari !== null) ? parseInt(prod.stok_miktari) : 100;
+    const isOutOfStock = stock <= 0;
+    const isLowStock = stock >= 1 && stock <= 5;
+
     const catLower = catName.toLowerCase();
     const prodLower = prodName.toLowerCase();
     const isPizza = prodLower.includes('pizza') || catLower.includes('pizza');
 
     const formattedPrice = (prod.fiyat % 1 === 0) ? prod.fiyat.toFixed(0) : prod.fiyat.toFixed(2);
 
+    let stockBadgeHTML = '';
+    if (isOutOfStock) {
+        stockBadgeHTML = `<div style="font-size:0.65rem; font-weight:800; color:#fca5a5; background:rgba(220,38,38,0.2); border:1px solid rgba(220,38,38,0.4); padding:1px 5px; border-radius:4px; white-space:nowrap; margin-top:2px; max-width:100%; overflow:hidden; text-overflow:ellipsis;">⛔ Tükendi</div>`;
+    } else if (isLowStock) {
+        stockBadgeHTML = `<div style="font-size:0.65rem; font-weight:800; color:#fdba74; background:rgba(234,88,12,0.2); border:1px solid rgba(234,88,12,0.4); padding:1px 5px; border-radius:4px; white-space:nowrap; margin-top:2px; max-width:100%; overflow:hidden; text-overflow:ellipsis;">⚡ Son ${stock} Adet!</div>`;
+    }
+
+    const cardOnClick = isOutOfStock 
+        ? `onclick="showToast('⛔ Stok Tükendi')"` 
+        : `onclick="openProductNoteModal(${prod.id})"`;
+
     return `
-        <div class="product-card ${isSelected ? 'selected' : ''}" id="product-card-${prod.id}" onclick="openProductNoteModal(${prod.id})">
+        <div class="product-card ${isSelected ? 'selected' : ''} ${isOutOfStock ? 'out-of-stock' : ''}" id="product-card-${prod.id}" ${cardOnClick} style="${isOutOfStock ? 'opacity:0.55;' : ''}">
             <div class="product-card-image-box">
                 ${hasImage
             ? `<img src="${prod.gorsel_url}" alt="${prod.urun_adi}" class="product-card-img" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
@@ -662,10 +677,17 @@ function renderProductCardHTML(prod) {
                     <div class="product-title" title="${prod.urun_adi}">${prod.urun_adi}</div>
                 </div>
 
-                <div class="product-bottom-row">
-                    <div class="product-price-badge">${formattedPrice} ₺</div>
-                    <div class="product-actions-right">
-                        ${isSelected ? `
+                <div class="product-bottom-row" style="display:flex; justify-content:space-between; align-items:flex-end; gap:4px; width:100%;">
+                    <div class="product-price-section" style="display:flex; flex-direction:column; align-items:flex-start; justify-content:center; min-width:0; flex-shrink:1; overflow:hidden;">
+                        <div class="product-price-badge">${formattedPrice} ₺</div>
+                        ${stockBadgeHTML}
+                    </div>
+                    <div class="product-actions-right" style="flex-shrink:0;">
+                        ${isOutOfStock ? `
+                            <button class="btn-add-circle" disabled style="background:#4b5563; opacity:0.6; cursor:not-allowed;" title="Tükendi">
+                                <span>⛔</span>
+                            </button>
+                        ` : (isSelected ? `
                             <div class="quantity-counter-box" onclick="event.stopPropagation();">
                                 <button class="btn-qty-step" title="Adet Azalt" onclick="quickAddToCart(event, ${prod.id}, -1)"><span>-</span></button>
                                 <span class="product-cart-qty-badge">${inCartQty}</span>
@@ -679,7 +701,7 @@ function renderProductCardHTML(prod) {
                             <button class="btn-add-circle" title="Sepete Ekle" onclick="quickAddToCart(event, ${prod.id}, 1)">
                                 <span>+</span>
                             </button>
-                        `)}
+                        `))}
                     </div>
                 </div>
             </div>
@@ -693,13 +715,25 @@ function quickAddToCart(event, productId, delta = 1) {
     const prod = state.urunler.find(p => p.id === productId);
     if (!prod) return;
 
+    const stock = (prod.stok_miktari !== undefined && prod.stok_miktari !== null) ? parseInt(prod.stok_miktari) : 100;
+    if (stock <= 0) {
+        showToast("⛔ Stok Tükendi");
+        return;
+    }
+
     const catName = (prod.kategori_adi || '').toLowerCase();
     const prodName = (prod.urun_adi || '').toLowerCase();
     const isPizza = prodName.includes('pizza') || catName.includes('pizza');
 
     const cartItems = state.cart.filter(item => item.urun_id === productId);
+    const inCartQty = cartItems.reduce((sum, item) => sum + item.adet, 0);
 
     if (delta > 0) {
+        if (inCartQty + 1 > stock) {
+            showToast(`⚠️ Stokta sadece ${stock} adet kalmıştır.`);
+            return;
+        }
+
         if (cartItems.length > 0) {
             const lastItem = cartItems[cartItems.length - 1];
             lastItem.adet += 1;
@@ -744,6 +778,12 @@ window.quickAddToCart = quickAddToCart;
 function openProductNoteModal(productId) {
     const prod = state.urunler.find(p => p.id === productId);
     if (!prod) return;
+
+    const stock = (prod.stok_miktari !== undefined && prod.stok_miktari !== null) ? parseInt(prod.stok_miktari) : 100;
+    if (stock <= 0) {
+        showToast("⚠️ Bu ürünün stoğu tükenmiştir, sipariş verilemez.");
+        return;
+    }
 
     state.currentProduct = prod;
     state.selectedSize = PIZZA_SIZES[0];
@@ -1031,6 +1071,15 @@ function confirmAddToCart() {
 
     const quantity = parseInt(document.getElementById('modalQuantity').value) || 1;
     const manualNote = document.getElementById('modalProductNote').value.trim();
+
+    const stock = (state.currentProduct.stok_miktari !== undefined && state.currentProduct.stok_miktari !== null) ? parseInt(state.currentProduct.stok_miktari) : 100;
+    const cartItems = state.cart.filter(item => item.urun_id === state.currentProduct.id);
+    const inCartQty = cartItems.reduce((sum, item) => sum + item.adet, 0);
+
+    if (inCartQty + quantity > stock) {
+        showToast(`⚠️ Stokta sadece ${stock} adet kalmıştır.`);
+        return;
+    }
 
     let calculatedUnitPrice = state.currentProduct.fiyat;
     let fullTitle = state.currentProduct.urun_adi;
@@ -1546,9 +1595,8 @@ function renderOrderTrackingUI() {
 
     container.style.display = 'block';
 
-    const latestOrder = orders[orders.length - 1];
-    const status = latestOrder.siparis_durumu;
     const totalAdisyon = state.genelToplam || orders.reduce((acc, o) => acc + (o.toplam_tutar || 0), 0);
+    const totalAdisyonStr = (totalAdisyon % 1 === 0) ? totalAdisyon.toFixed(0) : totalAdisyon.toFixed(2);
 
     const chevronDownSVG = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle;"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
     const chevronUpSVG = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle;"><polyline points="18 15 12 9 6 15"></polyline></svg>`;
@@ -1561,7 +1609,7 @@ function renderOrderTrackingUI() {
                     <div style="display:flex; align-items:center; gap: 8px;">
                         <span style="font-size: 1.1rem;">📋</span>
                         <span style="font-size: 0.92rem; font-weight: 700; color: var(--text-primary);">
-                            Adisyon (${orders.length} Sipariş • ${totalAdisyon.toFixed(2)} ₺)
+                            Adisyon (${orders.length} Sipariş • ${totalAdisyonStr} ₺)
                         </span>
                     </div>
                     <span>${chevronDownSVG}</span>
@@ -1572,6 +1620,8 @@ function renderOrderTrackingUI() {
     }
 
     // TEK BİR NET DURUM BAŞLIĞI
+    const latestOrder = orders[orders.length - 1];
+    const status = latestOrder ? latestOrder.siparis_durumu : '';
     let currentStatusHTML = '';
 
     if (status === 'garson_onayi_bekliyor') {
@@ -1660,28 +1710,30 @@ function renderOrderTrackingUI() {
     groupKeys.forEach((key, idx) => {
         const group = groupedItemsMap[key];
         const isExpanded = expandedGroupDetailsMap[key] || false;
+        const groupPriceStr = (group.total_tutar % 1 === 0) ? group.total_tutar.toFixed(0) : group.total_tutar.toFixed(2);
 
         let sublinesHTML = '';
         group.sublines.forEach(sub => {
+            const subPriceStr = (sub.tutar % 1 === 0) ? sub.tutar.toFixed(0) : sub.tutar.toFixed(2);
             sublinesHTML += `
                 <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.78rem; padding: 3px 0; color:#cbd5e1; border-bottom: 1px dashed rgba(255,255,255,0.06);">
                     <span>Sipariş ${sub.orderIndex} ${sub.orderTime ? `• ${sub.orderTime}` : ''} (${sub.adet}x)</span>
-                    <span>${sub.isPaid ? '<span style="color:#10b981; font-weight:700;">🟢 Ödendi</span>' : '<span style="color:#f59e0b; font-weight:700;">🟡 Kasada Ödenecek</span>'} • ${sub.tutar.toFixed(2)} ₺</span>
+                    <span style="white-space:nowrap;">${sub.isPaid ? '<span style="color:#10b981; font-weight:700;">🟢 Ödendi</span>' : '<span style="color:#f59e0b; font-weight:700;">🟡 Kasada Ödenecek</span>'} • ${subPriceStr} ₺</span>
                 </div>
             `;
         });
 
         ordersListHTML += `
             <div style="padding: 8px 0; ${idx > 0 ? 'border-top: 1px dashed rgba(255,255,255,0.1);' : ''}">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <div>
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                    <div style="min-width: 0; flex-shrink: 1;">
                         <span style="font-weight: 800; font-size: 0.95rem; color: #fff;">${group.total_adet}x ${group.urun_adi}</span>
                         ${group.urun_notu ? `<div style="font-size:0.75rem; color:#94a3b8;">Not: ${group.urun_notu}</div>` : ''}
                     </div>
-                    <div style="display:flex; align-items:center; gap: 8px;">
-                        <span style="font-weight: 800; font-size: 0.95rem; color: #fbbf24;">${group.total_tutar.toFixed(2)} ₺</span>
-                        <button type="button" onclick="toggleGroupDetails('${key}')" style="background: rgba(99,102,241,0.15); border: 1px solid rgba(99,102,241,0.4); color: #a5b4fc; border-radius: 6px; padding: 2px 6px; font-size: 0.7rem; font-weight: 700; cursor: pointer;">
-                            ${isExpanded ? '▲ Gizle' : '🔍 Ayrıntılar'}
+                    <div style="display:flex; align-items:center; gap: 8px; flex-shrink: 0;">
+                        <span style="font-weight: 800; font-size: 0.95rem; color: #fbbf24; white-space: nowrap; flex-shrink: 0;">${groupPriceStr} ₺</span>
+                        <button type="button" onclick="toggleGroupDetails('${key}')" style="background: rgba(99,102,241,0.15); border: 1px solid rgba(99,102,241,0.4); color: #a5b4fc; border-radius: 6px; padding: 4px 8px; font-size: 0.75rem; font-weight: 700; cursor: pointer; white-space: nowrap; flex-shrink: 0; user-select: none; touch-action: manipulation;">
+                            ${isExpanded ? '▲ Gizle' : 'Ayrıntılar'}
                         </button>
                     </div>
                 </div>
@@ -1705,7 +1757,7 @@ function renderOrderTrackingUI() {
 
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.12); padding-top: 10px; font-weight: 800;">
                     <span style="font-size: 0.95rem;">Genel Adisyon Toplamı:</span>
-                    <span style="color: #10b981; font-size: 1.15rem;">${totalAdisyon.toFixed(2)} ₺</span>
+                    <span style="color: #10b981; font-size: 1.15rem; white-space: nowrap;">${totalAdisyonStr} ₺</span>
                 </div>
             </div>
 

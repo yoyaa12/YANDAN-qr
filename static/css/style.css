@@ -535,6 +535,7 @@ textarea:focus {
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-shrink: 0;
 }
 
 .quantity-counter-box {
@@ -545,6 +546,8 @@ textarea:focus {
     border: 1px solid var(--primary);
     border-radius: 10px;
     padding: 2px 4px;
+    flex-shrink: 0;
+    white-space: nowrap;
 }
 
 .btn-qty-step {
@@ -2857,5 +2860,42 @@ body.vega-kasa-body {
     100% {
         transform: scale(1);
         opacity: 1;
+    }
+}
+
+/* ÖZEL MATTE DARK LÜKS TOAST BİLDİRİMİ (SARI RENK VE HEADER KAPATMA ENGELENDİ) */
+/* ÖZEL MATTE DARK LÜKS TOAST BİLDİRİMİ (PERFEKT EKRAN ORTALAMA VE GEOMETRİ DÜZELTMESİ) */
+.toast-notification {
+    position: fixed;
+    top: 75px;
+    left: 0;
+    right: 0;
+    margin: 0 auto;
+    width: fit-content;
+    max-width: 88vw;
+    background: #0f172a;
+    border: 1px solid rgba(239, 68, 68, 0.6);
+    color: #fca5a5;
+    padding: 8px 18px;
+    border-radius: 100px;
+    font-weight: 800;
+    font-size: 0.82rem;
+    z-index: 999999;
+    white-space: nowrap;
+    text-align: center;
+    pointer-events: none;
+    user-select: none;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7);
+    animation: toastPopUp 0.2s ease-out;
+}
+
+@keyframes toastPopUp {
+    0% {
+        opacity: 0;
+        transform: translateY(-8px) scale(0.95);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
     }
 }
