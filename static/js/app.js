@@ -633,12 +633,17 @@ function renderProducts() {
 
 function renderProductCardHTML(prod) {
     const catName = prod.kategori_adi ? prod.kategori_adi : '';
+    const prodName = prod.urun_adi ? prod.urun_adi : '';
     const icon = getCategoryIcon(catName);
     const hasImage = prod.gorsel_url && prod.gorsel_url.trim().length > 0;
 
     const cartItems = state.cart.filter(item => item.urun_id === prod.id);
     const inCartQty = cartItems.reduce((sum, item) => sum + item.adet, 0);
     const isSelected = inCartQty > 0;
+
+    const catLower = catName.toLowerCase();
+    const prodLower = prodName.toLowerCase();
+    const isPizza = prodLower.includes('pizza') || catLower.includes('pizza');
 
     const formattedPrice = (prod.fiyat % 1 === 0) ? prod.fiyat.toFixed(0) : prod.fiyat.toFixed(2);
 
@@ -666,11 +671,15 @@ function renderProductCardHTML(prod) {
                                 <span class="product-cart-qty-badge">${inCartQty}</span>
                                 <button class="btn-qty-step" title="Adet Artır" onclick="quickAddToCart(event, ${prod.id}, 1)"><span>+</span></button>
                             </div>
+                        ` : (isPizza ? `
+                            <button class="btn-select-size" title="Boyut Seç" onclick="quickAddToCart(event, ${prod.id}, 1)" style="padding:5px 12px; border-radius:8px; background:rgba(245, 158, 11, 0.15); border:1px solid var(--primary); color:var(--primary); font-size:0.8rem; font-weight:800; white-space:nowrap; cursor:pointer;">
+                                Boy Seç
+                            </button>
                         ` : `
                             <button class="btn-add-circle" title="Sepete Ekle" onclick="quickAddToCart(event, ${prod.id}, 1)">
                                 <span>+</span>
                             </button>
-                        `}
+                        `)}
                     </div>
                 </div>
             </div>
@@ -1104,6 +1113,10 @@ function updateProductCardDOM(prodId) {
     const actionsRightEl = cardEl.querySelector('.product-actions-right');
     if (!actionsRightEl) return;
 
+    const catName = (prod.kategori_adi || '').toLowerCase();
+    const prodName = (prod.urun_adi || '').toLowerCase();
+    const isPizza = prodName.includes('pizza') || catName.includes('pizza');
+
     if (isSelected) {
         const qtyBadge = actionsRightEl.querySelector('.product-cart-qty-badge');
         if (qtyBadge) {
@@ -1117,6 +1130,12 @@ function updateProductCardDOM(prodId) {
                 </div>
             `;
         }
+    } else if (isPizza) {
+        actionsRightEl.innerHTML = `
+            <button class="btn-select-size" title="Boyut Seç" onclick="quickAddToCart(event, ${prod.id}, 1)" style="padding:5px 12px; border-radius:8px; background:rgba(245, 158, 11, 0.15); border:1px solid var(--primary); color:var(--primary); font-size:0.8rem; font-weight:800; white-space:nowrap; cursor:pointer;">
+                Boy Seç
+            </button>
+        `;
     } else {
         actionsRightEl.innerHTML = `
             <button class="btn-add-circle" title="Sepete Ekle" onclick="quickAddToCart(event, ${prod.id}, 1)">
@@ -1196,19 +1215,19 @@ function openCartModal() {
         let html = '';
         state.cart.forEach((item, index) => {
             html += `
-                <div class="order-item-row" style="padding: 10px 0; border-bottom: 1px dashed rgba(255,255,255,0.08);">
+                <div class="order-item-row" style="padding: 6px 0; border-bottom: 1px dashed rgba(255,255,255,0.08);">
                     <div class="order-item-main" style="display:flex; justify-content:space-between; align-items:center;">
-                        <div style="font-weight:700; font-size:0.95rem;">${item.urun_adi}</div>
-                        <div style="font-weight:800; color:#fbbf24;">${item.ara_toplam.toFixed(2)} ₺</div>
+                        <div style="font-weight:700; font-size:0.92rem;">${item.urun_adi}</div>
+                        <div style="font-weight:800; color:#fbbf24; font-size:0.95rem;">${item.ara_toplam.toFixed(2)} ₺</div>
                     </div>
-                    ${item.urun_notu ? `<div class="order-item-note" style="margin-top:2px;">Not: ${item.urun_notu}</div>` : ''}
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+                    ${item.urun_notu ? `<div class="order-item-note" style="margin-top:2px; font-size:0.8rem; padding:2px 6px;">Not: ${item.urun_notu}</div>` : ''}
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
                         <div style="display:flex; align-items:center; gap:6px;">
-                            <button type="button" onclick="window.updateCartItemQuantity(${index}, -1)" style="width:36px; height:36px; font-weight:800; font-size:1.2rem; border-radius:var(--radius-sm); background:rgba(255,255,255,0.12); border:1px solid var(--border-color); color:#fff; cursor:pointer; user-select:none; touch-action:manipulation;">-</button>
-                            <span style="font-weight:800; font-size:1.1rem; min-width:28px; text-align:center;">${item.adet}</span>
-                            <button type="button" onclick="window.updateCartItemQuantity(${index}, 1)" style="width:36px; height:36px; font-weight:800; font-size:1.2rem; border-radius:var(--radius-sm); background:rgba(255,255,255,0.12); border:1px solid var(--border-color); color:#fff; cursor:pointer; user-select:none; touch-action:manipulation;">+</button>
+                            <button type="button" onclick="window.updateCartItemQuantity(${index}, -1)" style="width:30px; height:30px; font-weight:800; font-size:1.1rem; border-radius:var(--radius-sm); background:rgba(255,255,255,0.12); border:1px solid var(--border-color); color:#fff; cursor:pointer; user-select:none; touch-action:manipulation;">-</button>
+                            <span style="font-weight:800; font-size:1rem; min-width:24px; text-align:center;">${item.adet}</span>
+                            <button type="button" onclick="window.updateCartItemQuantity(${index}, 1)" style="width:30px; height:30px; font-weight:800; font-size:1.1rem; border-radius:var(--radius-sm); background:rgba(255,255,255,0.12); border:1px solid var(--border-color); color:#fff; cursor:pointer; user-select:none; touch-action:manipulation;">+</button>
                         </div>
-                        <button style="background:none; border:none; color: var(--danger); font-size: 0.85rem; font-weight:700; cursor:pointer;" onclick="removeCartItem(${index})">🗑️ Sil</button>
+                        <button style="background:none; border:none; color: var(--danger); font-size: 0.82rem; font-weight:700; cursor:pointer;" onclick="removeCartItem(${index})">🗑️ Sil</button>
                     </div>
                 </div>
             `;
@@ -1220,8 +1239,72 @@ function openCartModal() {
     document.getElementById('cartModal').classList.add('active');
 }
 
+window.showCustomConfirm = function (options) {
+    const { title, message, icon, confirmText, confirmColor, onConfirm } = options;
+
+    const modal = document.getElementById('customConfirmModal');
+    if (!modal) return;
+
+    if (title) document.getElementById('customConfirmTitle').innerText = title;
+    if (message) document.getElementById('customConfirmMessage').innerText = message;
+    if (icon) {
+        const iconEl = modal.querySelector('div[style*="font-size: 2.8rem"]');
+        if (iconEl) iconEl.innerText = icon;
+    }
+
+    const confirmBtn = document.getElementById('btnCustomConfirmAction');
+    if (confirmBtn) {
+        if (confirmText) confirmBtn.innerText = confirmText;
+        if (confirmColor) confirmBtn.style.background = confirmColor;
+        confirmBtn.onclick = function () {
+            closeModal('customConfirmModal');
+            if (onConfirm) onConfirm();
+        };
+    }
+
+    modal.classList.add('active');
+};
+
+window.clearCartConfirm = function () {
+    if (state.cart.length === 0) return;
+
+    showCustomConfirm({
+        title: 'Sepeti Temizle',
+        message: 'Seçili tüm ürünler sepetten kaldırılacaktır, onaylıyor musunuz?',
+        icon: '🗑️',
+        confirmText: 'Evet, Temizle',
+        confirmColor: 'var(--danger)',
+        onConfirm: () => {
+            state.cart = [];
+            notifyCartUpdateToSocket();
+            updateCartUI();
+            closeModal('cartModal');
+            showToast("🗑️ Sepetiniz tamamen temizlendi.");
+        }
+    });
+};
+
 function updateCartItemQuantity(index, delta) {
     if (!state.cart[index]) return;
+
+    if (state.cart[index].adet === 1 && delta === -1) {
+        const item = state.cart[index];
+        showCustomConfirm({
+            title: 'Ürünü Sil',
+            message: `"${item.urun_adi}" ürününü sepetten kaldırmak istiyor musunuz?`,
+            icon: '🗑️',
+            confirmText: 'Evet, Sil',
+            confirmColor: 'var(--danger)',
+            onConfirm: () => {
+                state.cart.splice(index, 1);
+                notifyCartUpdateToSocket();
+                updateCartUI();
+                openCartModal();
+            }
+        });
+        return;
+    }
+
     state.cart[index].adet += delta;
     if (state.cart[index].adet <= 0) {
         state.cart.splice(index, 1);
@@ -1234,10 +1317,22 @@ function updateCartItemQuantity(index, delta) {
 }
 
 function removeCartItem(index) {
-    state.cart.splice(index, 1);
-    notifyCartUpdateToSocket();
-    updateCartUI();
-    openCartModal();
+    const item = state.cart[index];
+    if (!item) return;
+
+    showCustomConfirm({
+        title: 'Ürünü Sil',
+        message: `"${item.urun_adi}" ürününü sepetten kaldırmak istiyor musunuz?`,
+        icon: '🗑️',
+        confirmText: 'Evet, Sil',
+        confirmColor: 'var(--danger)',
+        onConfirm: () => {
+            state.cart.splice(index, 1);
+            notifyCartUpdateToSocket();
+            updateCartUI();
+            openCartModal();
+        }
+    });
 }
 
 // ÖDEME ONAY VE KART SEÇİM / DEKONT EKRANI MODALİ
