@@ -1556,17 +1556,21 @@ window.showDynamicQRModal = async function (masaId) {
                         <img id="modalQRImage" src="${qrApiUrl}" width="200" height="200" alt="Canlı QR Kodu" style="display:block; border-radius:8px;">
                     </div>
                     
-                    <div style="background:rgba(255,255,255,0.05); padding:10px; border-radius:12px; margin-bottom:12px;">
+                    <div style="background:rgba(255,255,255,0.05); padding:10px; border-radius:12px; margin-bottom:12px; display:flex; flex-direction:column; align-items:center; gap:4px;">
                         <div style="font-size:0.75rem; color:#aaa; font-weight:bold;">🔑 CANLI MASA GÜVENLİK KODU</div>
-                        <div style="font-weight:900; font-size:1.4rem; color:#10b981; font-family:monospace; letter-spacing:3px;" id="modalQRToken">${data.token}</div>
+                        <div style="display:flex; align-items:center; justify-content:center; gap:10px;">
+                            <div style="font-weight:900; font-size:1.4rem; color:#10b981; font-family:monospace; letter-spacing:3px;" id="modalQRToken">${data.token}</div>
+                            <button type="button" onclick="copyDynamicQRToken(event)" title="Kopyala" style="background:rgba(16, 185, 129, 0.2); border:1px solid #10b981; color:#10b981; border-radius:8px; padding:4px 8px; font-size:0.95rem; cursor:pointer; touch-action:manipulation; user-select:none;">📋</button>
+                        </div>
                     </div>
 
                     <div style="font-size:0.85rem; color:#fbbf24; font-weight:bold;">
                         ⏳ QR Yenilenme Süresi: <span id="qrRemainingTimer">${data.remaining_seconds}</span> saniye
                     </div>
                     
-                    <div style="margin-top:14px;">
-                        <a id="modalQRLink" href="${data.qr_url}" target="_blank" style="color:#6366f1; font-size:0.8rem; text-decoration:underline;">🔗 Masa Menü Linkine Doğrudan Git</a>
+                    <div style="margin-top:14px; display:flex; align-items:center; justify-content:center; gap:8px;">
+                        <a id="modalQRLink" href="${data.qr_url}" target="_blank" style="color:#818cf8; font-size:0.85rem; font-weight:700; text-decoration:underline;">🔗 Masa Menü Linkine Doğrudan Git</a>
+                        <button type="button" onclick="copyDynamicQRLink(event)" title="Kopyala" style="background:rgba(99, 102, 241, 0.2); border:1px solid #6366f1; color:#818cf8; border-radius:8px; padding:4px 8px; font-size:0.85rem; cursor:pointer; touch-action:manipulation; user-select:none;">📋</button>
                     </div>
                 </div>
             </div>
@@ -1596,4 +1600,62 @@ function intVal(val) {
     const parsed = parseInt(val, 10);
     return isNaN(parsed) ? 30 : parsed;
 }
+
+window.copyDynamicQRToken = function (event) {
+    if (event) event.stopPropagation();
+    const tokenEl = document.getElementById("modalQRToken");
+    if (!tokenEl) return;
+    const text = tokenEl.innerText.trim();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+            showKasaToast("📋 Güvenlik kodu kopyalandı!");
+        }).catch(() => fallbackCopyText(text, "📋 Güvenlik kodu kopyalandı!"));
+    } else {
+        fallbackCopyText(text, "📋 Güvenlik kodu kopyalandı!");
+    }
+};
+
+window.copyDynamicQRLink = function (event) {
+    if (event) event.stopPropagation();
+    const linkEl = document.getElementById("modalQRLink");
+    if (!linkEl) return;
+    const url = linkEl.href;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(() => {
+            showKasaToast("📋 Masa QR linki kopyalandı!");
+        }).catch(() => fallbackCopyText(url, "📋 Masa QR linki kopyalandı!"));
+    } else {
+        fallbackCopyText(url, "📋 Masa QR linki kopyalandı!");
+    }
+};
+
+function fallbackCopyText(text, msg) {
+    const input = document.createElement("input");
+    input.value = text;
+    document.body.appendChild(input);
+    input.select();
+    try {
+        document.execCommand("copy");
+        showKasaToast(msg);
+    } catch (e) { }
+    document.body.removeChild(input);
+}
+
+window.showKasaToast = function (msg) {
+    let container = document.getElementById('kasaToastContainer');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'kasaToastContainer';
+        container.style.cssText = 'position:fixed; bottom:30px; left:50%; transform:translateX(-50%); z-index:999999; display:flex; flex-direction:column; gap:8px; pointer-events:none;';
+        document.body.appendChild(container);
+    }
+    const toast = document.createElement('div');
+    toast.style.cssText = 'background:rgba(15, 23, 42, 0.96); border:1px solid rgba(16, 185, 129, 0.6); color:#6ee7b7; padding:8px 18px; border-radius:100px; font-weight:800; font-size:0.85rem; box-shadow:0 8px 24px rgba(0,0,0,0.6); white-space:nowrap; text-align:center; transition:opacity 0.2s ease;';
+    toast.innerText = msg;
+    container.appendChild(toast);
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 200);
+    }, 2200);
+};
 
