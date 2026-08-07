@@ -69,14 +69,16 @@ input[type=number] {
 
 html,
 body {
-    overscroll-behavior-y: contain;
-    touch-action: pan-x pan-y;
+    overflow-y: auto;
+    overscroll-behavior-y: auto;
+    touch-action: auto;
 }
 
 body {
     background-color: var(--bg-main);
     color: var(--text-primary);
     min-height: 100vh;
+    height: auto;
     display: flex;
     flex-direction: column;
 }
@@ -2275,7 +2277,7 @@ textarea:focus {
 /* ==========================================================================
    KASA / POS EKRAAN KİLİTLEME & DÜZEN KAYMALARINI ÖNLEME STİLLERİ
    ========================================================================== */
-html,
+html.vega-kasa-body,
 body.vega-kasa-body {
     height: 100vh !important;
     max-height: 100vh !important;
