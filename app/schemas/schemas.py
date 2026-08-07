@@ -108,7 +108,6 @@ class MasaResponse(BaseModel):
 class GarsonResponse(BaseModel):
     id: int
     ad_soyad: str
-    pin_kodu: str
 
 class BanDeviceModel(BaseModel):
     device_id: str
@@ -128,4 +127,38 @@ class SiparisDurumIslemCevapModel(BaseModel):
     status: str
     message: str
     data: SiparisDurumResponse
+
+# --- Endpoint inline modelleri (masalar.py'den taşındı) ---
+
+class MoveMasaModel(BaseModel):
+    from_masa_id: int
+    to_masa_id: int
+
+class VerifyQRModel(BaseModel):
+    token: str
+    device_id: Optional[str] = None
+
+# --- Genel Response DTO'ları ---
+
+class LoginResponse(BaseModel):
+    status: str
+    user: KullaniciResponse
+
+class GarsonPinResponse(BaseModel):
+    status: str
+    garson: KullaniciResponse
+
+class AdminIslemResponse(BaseModel):
+    status: str
+    message: Optional[str] = None
+    id: Optional[int] = None
+
+class QRDogrulamaResponse(BaseModel):
+    valid: bool
+    message: str
+    masa_id: Optional[int] = None
+
+class GenelBasariliResponse(BaseModel):
+    status: str
+    message: str
 
