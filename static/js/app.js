@@ -127,19 +127,25 @@ const DESSERT_EXTRAS = [
     { id: 'fistik', name: 'Ekstra Antep Fıstığı Tozu', price: 30.00 }
 ];
 
+let globalAudioCtx = null;
 function playNotificationSound() {
     try {
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
+        if (!globalAudioCtx) {
+            globalAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (globalAudioCtx.state === 'suspended') {
+            globalAudioCtx.resume();
+        }
+        const osc = globalAudioCtx.createOscillator();
+        const gain = globalAudioCtx.createGain();
         osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.frequency.setValueAtTime(523.25, audioCtx.currentTime);
-        osc.frequency.setValueAtTime(659.25, audioCtx.currentTime + 0.1);
-        gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+        gain.connect(globalAudioCtx.destination);
+        osc.frequency.setValueAtTime(523.25, globalAudioCtx.currentTime);
+        osc.frequency.setValueAtTime(659.25, globalAudioCtx.currentTime + 0.05);
+        gain.gain.setValueAtTime(0.1, globalAudioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, globalAudioCtx.currentTime + 0.15);
         osc.start();
-        osc.stop(audioCtx.currentTime + 0.3);
+        osc.stop(globalAudioCtx.currentTime + 0.15);
     } catch (e) { }
 }
 
@@ -631,8 +637,10 @@ function renderProductCardHTML(prod) {
     const inCartQty = cartItems.reduce((sum, item) => sum + item.adet, 0);
     const isSelected = inCartQty > 0;
 
+    const formattedPrice = (prod.fiyat % 1 === 0) ? prod.fiyat.toFixed(0) : prod.fiyat.toFixed(2);
+
     return `
-        <div class="product-card ${isSelected ? 'selected' : ''}" onclick="openProductNoteModal(${prod.id})">
+        <div class="product-card ${isSelected ? 'selected' : ''}" id="product-card-${prod.id}" onclick="openProductNoteModal(${prod.id})">
             <div class="product-card-image-box">
                 ${hasImage
             ? `<img src="${prod.gorsel_url}" alt="${prod.urun_adi}" class="product-card-img" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
@@ -647,7 +655,7 @@ function renderProductCardHTML(prod) {
                 </div>
 
                 <div class="product-bottom-row">
-                    <div class="product-price-badge">${prod.fiyat.toFixed(0)} ₺</div>
+                    <div class="product-price-badge">${formattedPrice} ₺</div>
                     <div class="product-actions-right">
                         ${isSelected ? `
                             <div class="quantity-counter-box" onclick="event.stopPropagation();">
@@ -685,7 +693,7 @@ function quickAddToCart(event, productId, delta = 1) {
             lastItem.adet += 1;
             lastItem.ara_toplam = lastItem.birim_fiyat * lastItem.adet;
             notifyCartUpdateToSocket();
-            updateCartUI();
+            updateCartUI(productId);
             playNotificationSound();
         } else if (isPizza) {
             openProductNoteModal(productId);
@@ -700,7 +708,7 @@ function quickAddToCart(event, productId, delta = 1) {
                 ara_toplam: prod.fiyat
             });
             notifyCartUpdateToSocket();
-            updateCartUI();
+            updateCartUI(productId);
             playNotificationSound();
         }
     } else if (delta < 0) {
@@ -714,7 +722,7 @@ function quickAddToCart(event, productId, delta = 1) {
                 lastItem.ara_toplam = lastItem.birim_fiyat * lastItem.adet;
             }
             notifyCartUpdateToSocket();
-            updateCartUI();
+            updateCartUI(productId);
         }
     }
 }
@@ -1073,8 +1081,50 @@ function notifyCartUpdateToSocket() {
     }
 }
 
+function updateProductCardDOM(prodId) {
+    const prod = state.urunler.find(p => p.id === prodId);
+    if (!prod) return;
+
+    const cardEl = document.getElementById(`product-card-${prod.id}`);
+    if (!cardEl) return;
+
+    const cartItems = state.cart.filter(item => item.urun_id === prod.id);
+    const inCartQty = cartItems.reduce((sum, item) => sum + item.adet, 0);
+    const isSelected = inCartQty > 0;
+
+    if (isSelected) {
+        cardEl.classList.add('selected');
+    } else {
+        cardEl.classList.remove('selected');
+    }
+
+    const actionsRightEl = cardEl.querySelector('.product-actions-right');
+    if (!actionsRightEl) return;
+
+    if (isSelected) {
+        const qtyBadge = actionsRightEl.querySelector('.product-cart-qty-badge');
+        if (qtyBadge) {
+            qtyBadge.innerText = inCartQty;
+        } else {
+            actionsRightEl.innerHTML = `
+                <div class="quantity-counter-box" onclick="event.stopPropagation();">
+                    <button class="btn-qty-step" title="Adet Azalt" onclick="quickAddToCart(event, ${prod.id}, -1)"><span>-</span></button>
+                    <span class="product-cart-qty-badge">${inCartQty}</span>
+                    <button class="btn-qty-step" title="Adet Artır" onclick="quickAddToCart(event, ${prod.id}, 1)"><span>+</span></button>
+                </div>
+            `;
+        }
+    } else {
+        actionsRightEl.innerHTML = `
+            <button class="btn-add-circle" title="Sepete Ekle" onclick="quickAddToCart(event, ${prod.id}, 1)">
+                <span>+</span>
+            </button>
+        `;
+    }
+}
+
 // EN ALTTA ÇAKIŞMAYAN SABİT SEPET BARI GÜNCELLEMESİ
-function updateCartUI() {
+function updateCartUI(affectedProdId = null) {
     const totalCount = state.cart.reduce((acc, item) => acc + item.adet, 0);
     const totalPrice = state.cart.reduce((acc, item) => acc + item.ara_toplam, 0);
 
@@ -1088,15 +1138,13 @@ function updateCartUI() {
     if (cartDock) {
         const isShowing = totalCount > 0;
         cartDock.style.display = isShowing ? 'flex' : 'none';
-
-        if (isShowing) {
-            cartDock.classList.remove('cart-dock-pop');
-            void cartDock.offsetWidth; // Reflow tetikle
-            cartDock.classList.add('cart-dock-pop');
-        }
     }
 
-    renderProducts();
+    if (affectedProdId) {
+        updateProductCardDOM(affectedProdId);
+    } else {
+        state.urunler.forEach(p => updateProductCardDOM(p.id));
+    }
 }
 
 window.changeModalQuantity = function (delta) {
@@ -1325,7 +1373,7 @@ function openFirstOrderPINModal(odemeYontemi) {
     pendingPaymentMethod = odemeYontemi;
     const modal = document.getElementById('firstOrderPINModal');
     if (modal) modal.classList.add('active');
-    
+
     const input = document.getElementById('securityPinInput');
     if (input) {
         input.value = '';
@@ -1344,10 +1392,10 @@ function submitFirstOrderPIN() {
         alert("Lütfen 6 haneli güvenlik kodunu eksiksiz girin.");
         return;
     }
-    
+
     state.currentTotpToken = input.value.trim();
     closeFirstOrderPINModal();
-    
+
     // Modal kapanınca siparişi otomatik tekrar dene
     const actionBox = document.getElementById('checkoutActionBox');
     if (actionBox) {
