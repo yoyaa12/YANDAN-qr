@@ -45,6 +45,13 @@
     font-family: 'Plus Jakarta Sans', sans-serif;
     scrollbar-width: none;
     -ms-overflow-style: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+button, a, .product-card, .category-card-box, .btn-add-circle, .btn-qty-step, .modal-close, .modal-overlay, .size-option-card {
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
 }
 
 ::-webkit-scrollbar {

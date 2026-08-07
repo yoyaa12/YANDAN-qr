@@ -244,7 +244,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadCategories();
     loadProducts();
     checkActiveOrder(); // F5 RECOVERY: Sayfa yenilendiğinde aktif siparişi getirir!
-    initCategoryScrollNavigation(); // Kategori otomatik kaydırma geçişi
 
     // Socket.io Canlı Dinleyici (Otomatik Reconnection Ayarları)
     socket = io({
@@ -394,8 +393,8 @@ function initCategoryIntersectionObserver() {
     }
 
     const options = {
-        root: section,
-        rootMargin: '-10% 0px -65% 0px',
+        root: null,
+        rootMargin: '-15% 0px -60% 0px',
         threshold: 0
     };
 
@@ -406,7 +405,7 @@ function initCategoryIntersectionObserver() {
                 const catId = (catIdAttr && catIdAttr !== 'other') ? parseInt(catIdAttr) : null;
                 if (state.activeKategoriId !== catId) {
                     state.activeKategoriId = catId;
-                    updateSidebarActiveStateOnly();
+                    updateSidebarActiveStateOnly(false);
                 }
             }
         });
@@ -416,7 +415,7 @@ function initCategoryIntersectionObserver() {
     sections.forEach(s => categoryObserver.observe(s));
 }
 
-function updateSidebarActiveStateOnly() {
+function updateSidebarActiveStateOnly(isManualClick = false) {
     const container = document.getElementById('categoryGridBar');
     if (!container) return;
 
@@ -424,8 +423,12 @@ function updateSidebarActiveStateOnly() {
     cards.forEach(card => {
         const onclickAttr = card.getAttribute('onclick') || '';
         if (state.activeKategoriId !== null && onclickAttr.includes(`selectCategory(${state.activeKategoriId})`)) {
-            card.classList.add('active');
-            card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            if (!card.classList.contains('active')) {
+                card.classList.add('active');
+                if (isManualClick) {
+                    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }
+            }
         } else {
             card.classList.remove('active');
         }
@@ -437,7 +440,7 @@ function updateSidebarActiveStateOnly() {
 function selectCategory(catId) {
     if (!catId) return;
     state.activeKategoriId = catId;
-    updateSidebarActiveStateOnly();
+    updateSidebarActiveStateOnly(true);
 
     const targetSec = document.getElementById(`cat-section-${catId}`);
     if (targetSec) {
