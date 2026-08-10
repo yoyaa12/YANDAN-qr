@@ -82,13 +82,13 @@ class MasaService:
             }
         return result
 
-    def verify_dynamic_qr_token(self, masa_id: int, token: str) -> bool:
+    def verify_dynamic_qr_token(self, masa_id: int, token: str, mark_as_used: bool = False) -> bool:
         masa = self.repo.get_by_id(masa_id)
         if not masa:
             return False
             
         totp_secret = masa.get("totp_secret")
-        if totp_secret and verify_dynamic_token(masa_id, totp_secret, token):
+        if totp_secret and verify_dynamic_token(masa_id, totp_secret, token, mark_as_used=mark_as_used):
             return True
 
         from app.services.siparis_service import TABLE_MOVES_MAP
@@ -96,7 +96,7 @@ class MasaService:
             if to_id == masa_id:
                 from_masa = self.repo.get_by_id(from_id)
                 if from_masa and from_masa.get("totp_secret"):
-                    if verify_dynamic_token(from_id, from_masa.get("totp_secret"), token):
+                    if verify_dynamic_token(from_id, from_masa.get("totp_secret"), token, mark_as_used=mark_as_used):
                         return True
         return False
 

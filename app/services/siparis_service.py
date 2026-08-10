@@ -119,7 +119,7 @@ class SiparisService:
                 
                 from app.core.totp_service import verify_dynamic_token
                 totp_secret = masa.get("totp_secret")
-                if not totp_secret or not verify_dynamic_token(data.masa_id, totp_secret, data.current_totp_token):
+                if not totp_secret or not verify_dynamic_token(data.masa_id, totp_secret, data.current_totp_token, mark_as_used=True):
                     raise HTTPException(status_code=403, detail="Geçersiz veya süresi dolmuş kod! Lütfen masadaki ekranda yazan güncel 6 haneli güvenlik kodunu girin.")
 
             siparis_kodu = f"SIP-{uuid.uuid4().hex[:6].upper()}"

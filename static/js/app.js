@@ -127,27 +127,6 @@ const DESSERT_EXTRAS = [
     { id: 'fistik', name: 'Ekstra Antep Fıstığı Tozu', price: 30.00 }
 ];
 
-let globalAudioCtx = null;
-function playNotificationSound() {
-    try {
-        if (!globalAudioCtx) {
-            globalAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        }
-        if (globalAudioCtx.state === 'suspended') {
-            globalAudioCtx.resume();
-        }
-        const osc = globalAudioCtx.createOscillator();
-        const gain = globalAudioCtx.createGain();
-        osc.connect(gain);
-        gain.connect(globalAudioCtx.destination);
-        osc.frequency.setValueAtTime(523.25, globalAudioCtx.currentTime);
-        osc.frequency.setValueAtTime(659.25, globalAudioCtx.currentTime + 0.05);
-        gain.gain.setValueAtTime(0.1, globalAudioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, globalAudioCtx.currentTime + 0.15);
-        osc.start();
-        osc.stop(globalAudioCtx.currentTime + 0.15);
-    } catch (e) { }
-}
 
 function showSecurityError(msg) {
     const errModal = document.getElementById('securityErrorModal');
@@ -193,6 +172,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     state.masaId = parseInt(masaParam);
     state.masaNo = state.masaId === 99 ? 'Developer Masası' : `Masa ${state.masaId}`; // Fallback
+
+    if (tokenParam) {
+        state.currentTotpToken = tokenParam;
+    }
 
     // --- DİNAMİK QR GÜVENLİK KONTROLÜ ---
     if (state.masaId !== 99) {
@@ -272,7 +255,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (container) container.style.display = 'none';
             } else {
                 checkActiveOrder();
-                playNotificationSound();
             }
         }
     });
@@ -305,7 +287,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     socket.on('nakit_odendi', (data) => {
         if (data && data.masa_id === state.masaId) {
             checkActiveOrder();
-            playNotificationSound();
             showToast("💵 Garson nakit ödemenizi tahsil etti. Teşekkürler!");
         }
     });
@@ -313,7 +294,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     socket.on('yeni_siparis', (data) => {
         if (data && data.masa_id === state.masaId) {
             checkActiveOrder();
-            playNotificationSound();
         }
     });
 
@@ -377,7 +357,6 @@ window.handleTableMove = function (fromMasaId, toMasaId, toMasaNo, fromMasaNo) {
     if (toBadgeEl) toBadgeEl.innerText = formatShortMasaNo(state.masaNo);
     if (transferModal) transferModal.classList.add('active');
 
-    playNotificationSound();
     showToast(`🔄 Adisyonunuz ve oturumunuz ${state.masaNo} masasına taşındı.`);
 };
 
@@ -740,7 +719,6 @@ function quickAddToCart(event, productId, delta = 1) {
             lastItem.ara_toplam = lastItem.birim_fiyat * lastItem.adet;
             notifyCartUpdateToSocket();
             updateCartUI(productId);
-            playNotificationSound();
         } else if (isPizza) {
             openProductNoteModal(productId);
         } else {
@@ -755,7 +733,6 @@ function quickAddToCart(event, productId, delta = 1) {
             });
             notifyCartUpdateToSocket();
             updateCartUI(productId);
-            playNotificationSound();
         }
     } else if (delta < 0) {
         if (cartItems.length > 0) {
@@ -1126,7 +1103,6 @@ function confirmAddToCart() {
 
     closeModal('productModal');
     updateCartUI();
-    playNotificationSound();
 }
 
 function notifyCartUpdateToSocket() {
@@ -1493,7 +1469,6 @@ async function executeOrderSubmit(odemeYontemi) {
             updateCartUI();
 
             await checkActiveOrder();
-            playNotificationSound();
 
             if (odemeYontemi === 'pos') {
                 showToast("💳 Ödemeniz onaylandı ve siparişiniz alındı!");
@@ -1504,10 +1479,10 @@ async function executeOrderSubmit(odemeYontemi) {
             // İlk sipariş güvenlik onayı gerekiyor!
             openFirstOrderPINModal(odemeYontemi);
         } else {
-            alert(data.detail || "Hata oluştu.");
+            showToast(data.detail || "⚠️ Hata oluştu.");
         }
     } catch (e) {
-        alert("Sunucuya ulaşılamadı.");
+        showToast("⚠️ Sunucuya ulaşılamadı.");
     }
 }
 
@@ -1536,7 +1511,7 @@ function closeFirstOrderPINModal() {
 function submitFirstOrderPIN() {
     const input = document.getElementById('securityPinInput');
     if (!input || !input.value || input.value.length < 6) {
-        alert("Lütfen 6 haneli güvenlik kodunu eksiksiz girin.");
+        showToast("⚠️ Lütfen 6 haneli güvenlik kodunu eksiksiz girin.");
         return;
     }
 
