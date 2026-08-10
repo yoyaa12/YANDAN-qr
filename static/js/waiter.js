@@ -606,82 +606,86 @@ function openMasaDetail(masaId) {
 
 window.approveTableOrdersWithPin = function (masaId) {
     requireGarsonPin(async (garson) => {
+        const garsonName = garson ? garson.garson_adi : 'Garson';
         const pendingOrders = waiterOrders.filter(o => o.masa_id === masaId && o.siparis_durumu === 'garson_onayi_bekliyor');
         try {
             await Promise.all(pendingOrders.map(o =>
                 fetch(`/api/siparisler/${o.id}/durum`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ yeni_durum: 'garson_onayladi_mutfakta', garson_adi: garson.garson_adi })
+                    body: JSON.stringify({ yeni_durum: 'garson_onayladi_mutfakta', garson_adi: garsonName })
                 })
             ));
             loadWaiterData();
-            showWaiterToast(`Masa ${garson.garson_adi} tarafından doğrulandı! Siparişler mutfağa aktarıldı. 🚀`);
+            showWaiterToast(`Masa ${garsonName} tarafından doğrulandı! Siparişler mutfağa aktarıldı. 🚀`);
         } catch (e) {
-            alert("İşlem başarısız.");
+            showWaiterToast("⚠️ İşlem başarısız.");
         }
     });
 };
 
 window.approveTableOrdersDirect = async function (masaId) {
     if (!activeGarson) return;
+    const garsonName = activeGarson.garson_adi;
     const pendingOrders = waiterOrders.filter(o => o.masa_id === masaId && o.siparis_durumu === 'garson_onayi_bekliyor');
     try {
         await Promise.all(pendingOrders.map(o =>
             fetch(`/api/siparisler/${o.id}/durum`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ yeni_durum: 'garson_onayladi_mutfakta', garson_adi: activeGarson.garson_adi })
+                body: JSON.stringify({ yeni_durum: 'garson_onayladi_mutfakta', garson_adi: garsonName })
             })
         ));
         loadWaiterData();
-        showWaiterToast(`Masa ${activeGarson.garson_adi} tarafından doğrulandı! 🚀`);
+        showWaiterToast(`Masa ${garsonName} tarafından doğrulandı! 🚀`);
     } catch (e) {
-        alert("İşlem başarısız.");
+        showWaiterToast("⚠️ İşlem başarısız.");
     }
 };
 
 window.collectCashTableWithPin = function (masaId) {
     requireGarsonPin(async (garson) => {
+        const garsonName = garson ? garson.garson_adi : 'Garson';
         const cashOrders = waiterOrders.filter(o => o.masa_id === masaId && (o.siparis_durumu === 'nakit_bekliyor' || (o.odeme_yontemi === 'nakit' && o.odeme_durumu !== 'odendi')));
         try {
             await Promise.all(cashOrders.map(o =>
                 fetch(`/api/siparisler/${o.id}/durum`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ yeni_durum: 'nakit_tahsil_edildi', garson_adi: garson.garson_adi })
+                    body: JSON.stringify({ yeni_durum: 'nakit_tahsil_edildi', garson_adi: garsonName })
                 })
             ));
             loadWaiterData();
-            showWaiterToast(`Nakit ödeme ${garson.garson_adi} tarafından tahsil edildi. Siparişler mutfağa aktarıldı! 👍`);
+            showWaiterToast(`Nakit ödeme ${garsonName} tarafından tahsil edildi. Siparişler mutfağa aktarıldı! 👍`);
         } catch (e) {
-            alert("İşlem başarısız.");
+            showWaiterToast("⚠️ İşlem başarısız.");
         }
     });
 };
 
 window.collectCashTableDirect = async function (masaId) {
     if (!activeGarson) return;
+    const garsonName = activeGarson.garson_adi;
     const cashOrders = waiterOrders.filter(o => o.masa_id === masaId && (o.siparis_durumu === 'nakit_bekliyor' || (o.odeme_yontemi === 'nakit' && o.odeme_durumu !== 'odendi')));
     try {
         await Promise.all(cashOrders.map(o =>
             fetch(`/api/siparisler/${o.id}/durum`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ yeni_durum: 'nakit_tahsil_edildi', garson_adi: activeGarson.garson_adi })
+                body: JSON.stringify({ yeni_durum: 'nakit_tahsil_edildi', garson_adi: garsonName })
             })
         ));
         loadWaiterData();
-        showWaiterToast(`Nakit ödeme ${activeGarson.garson_adi} tarafından tahsil edildi.`);
+        showWaiterToast(`Nakit ödeme ${garsonName} tarafından tahsil edildi.`);
     } catch (e) {
-        alert("İşlem başarısız.");
+        showWaiterToast("⚠️ İşlem başarısız.");
     }
 };
 
 window.deliverTableOrdersDirect = async function (masaId) {
+    const garsonName = activeGarson ? activeGarson.garson_adi : 'Garson';
     const readyOrders = waiterOrders.filter(o => o.masa_id === masaId && o.siparis_durumu === 'hazir');
     try {
-        const garsonName = activeGarson ? activeGarson.garson_adi : 'Garson';
         await Promise.all(readyOrders.map(o =>
             fetch(`/api/siparisler/${o.id}/durum`, {
                 method: 'PATCH',
@@ -692,61 +696,65 @@ window.deliverTableOrdersDirect = async function (masaId) {
         loadWaiterData();
         showWaiterToast(`🚀 Masa siparişi masaya teslim edildi.`);
     } catch (e) {
-        alert("İşlem başarısız.");
+        showWaiterToast("⚠️ İşlem başarısız.");
     }
 };
 
 window.deliverTableOrdersWithPin = function (masaId) {
     requireGarsonPin(async (garson) => {
+        const garsonName = garson ? garson.garson_adi : 'Garson';
         const readyOrders = waiterOrders.filter(o => o.masa_id === masaId && o.siparis_durumu === 'hazir');
         try {
             await Promise.all(readyOrders.map(o =>
                 fetch(`/api/siparisler/${o.id}/durum`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ yeni_durum: 'teslim_edildi', garson_adi: garson.garson_adi })
+                    body: JSON.stringify({ yeni_durum: 'teslim_edildi', garson_adi: garsonName })
                 })
             ));
             loadWaiterData();
-            showWaiterToast(`Siparişler ${garson.garson_adi} tarafından teslim edildi. 👍`);
+            showWaiterToast(`Siparişler ${garsonName} tarafından teslim edildi. 👍`);
         } catch (e) {
-            alert("İşlem başarısız.");
+            showWaiterToast("⚠️ İşlem başarısız.");
         }
     });
 };
 
 window.clearMasaWithPin = function (masaId) {
     requireGarsonPin(async (garson) => {
-        if (!confirm(`Masa oturumu ${garson.garson_adi} yetkisiyle sonlandırılacaktır. Onaylıyor musunuz?`)) return;
+        const garsonName = garson ? garson.garson_adi : 'Garson';
+        if (!confirm(`Masa oturumu ${garsonName} yetkisiyle sonlandırılacaktır. Onaylıyor musunuz?`)) return;
         try {
             const res = await fetch(`/api/masalar/${masaId}/clear`, { method: 'POST' });
             if (res.ok) {
                 loadWaiterData();
-                showWaiterToast(`Masa oturumu ${garson.garson_adi} tarafından sonlandırıldı.`);
+                showWaiterToast(`Masa oturumu ${garsonName} tarafından sonlandırıldı.`);
             }
         } catch (e) {
-            alert("İşlem başarısız.");
+            showWaiterToast("⚠️ İşlem başarısız.");
         }
     });
 };
 
 window.clearMasaDirect = async function (masaId) {
     if (!activeGarson) return;
-    if (!confirm(`Masa oturumu ${activeGarson.garson_adi} yetkisiyle sonlandırılacaktır. Onaylıyor musunuz?`)) return;
+    const garsonName = activeGarson.garson_adi;
+    if (!confirm(`Masa oturumu ${garsonName} yetkisiyle sonlandırılacaktır. Onaylıyor musunuz?`)) return;
     try {
         const res = await fetch(`/api/masalar/${masaId}/clear`, { method: 'POST' });
         if (res.ok) {
             loadWaiterData();
-            showWaiterToast(`Masa oturumu ${activeGarson.garson_adi} tarafından sonlandırıldı.`);
+            showWaiterToast(`Masa oturumu ${garsonName} tarafından sonlandırıldı.`);
         }
     } catch (e) {
-        alert("İşlem başarısız.");
+        showWaiterToast("⚠️ İşlem başarısız.");
     }
 };
 
 window.banDeviceWithPin = function (deviceId, masaId) {
     requireGarsonPin(async (garson) => {
-        if (!confirm(`Bu cihazı kalıcı olarak yasaklamak istediğinize emin misiniz? (${garson.garson_adi})`)) return;
+        const garsonName = garson ? garson.garson_adi : 'Garson';
+        if (!confirm(`Bu cihazı kalıcı olarak yasaklamak istediğinize emin misiniz? (${garsonName})`)) return;
         try {
             const res = await fetch(`/api/garson/ban-device`, {
                 method: 'POST',
@@ -757,19 +765,20 @@ window.banDeviceWithPin = function (deviceId, masaId) {
             if (res.ok) {
                 await fetch(`/api/masalar/${masaId}/clear`, { method: 'POST' });
                 loadWaiterData();
-                showWaiterToast(`Cihaz ${garson.garson_adi} tarafından banlandı.`);
+                showWaiterToast(`Cihaz ${garsonName} tarafından banlandı.`);
             } else {
-                alert(data.message || "İşlem başarısız.");
+                showWaiterToast("⚠️ " + (data.message || "İşlem başarısız."));
             }
         } catch (e) {
-            alert("İşlem başarısız.");
+            showWaiterToast("⚠️ İşlem başarısız.");
         }
     });
 };
 
 window.banDeviceDirect = async function (deviceId, masaId) {
     if (!activeGarson) return;
-    if (!confirm(`Bu cihazı kalıcı olarak yasaklamak istediğinize emin misiniz? (${activeGarson.garson_adi})`)) return;
+    const garsonName = activeGarson.garson_adi;
+    if (!confirm(`Bu cihazı kalıcı olarak yasaklamak istediğinize emin misiniz? (${garsonName})`)) return;
     try {
         const res = await fetch(`/api/garson/ban-device`, {
             method: 'POST',
@@ -780,13 +789,13 @@ window.banDeviceDirect = async function (deviceId, masaId) {
         if (res.ok) {
             await fetch(`/api/masalar/${masaId}/clear`, { method: 'POST' });
             loadWaiterData();
-            showWaiterToast(`Cihaz ${activeGarson.garson_adi} tarafından banlandı.`);
+            showWaiterToast(`Cihaz ${garsonName} tarafından banlandı.`);
             closeMasaDetailModal();
         } else {
-            alert(data.message || "İşlem başarısız.");
+            showWaiterToast("⚠️ " + (data.message || "İşlem başarısız."));
         }
     } catch (e) {
-        alert("İşlem başarısız.");
+        showWaiterToast("⚠️ İşlem başarısız.");
     }
 };
 
@@ -819,7 +828,7 @@ async function loadAllMenuProducts() {
 window.openEditOrderModalForTable = async function (masaId) {
     const pendingOrders = waiterOrders.filter(o => o.masa_id === masaId && o.siparis_durumu === 'garson_onayi_bekliyor');
     if (pendingOrders.length === 0) {
-        alert("Düzenlenecek onay bekleyen sipariş bulunamadı.");
+        showWaiterToast("⚠️ Düzenlenecek onay bekleyen sipariş bulunamadı.");
         return;
     }
 
@@ -937,16 +946,17 @@ window.saveEditedOrder = async function () {
     if (!currentEditOrder) return;
 
     if (currentEditItems.length === 0) {
-        alert("Siparişte en az 1 ürün bulunmalıdır.");
+        showWaiterToast("⚠️ Siparişte en az 1 ürün bulunmalıdır.");
         return;
     }
 
     if (!activeGarson) return;
+    const garsonName = activeGarson.garson_adi;
 
     const totalAmount = currentEditItems.reduce((acc, item) => acc + (item.adet * item.birim_fiyat), 0);
     const payload = {
         toplam_tutar: totalAmount,
-        garson_adi: activeGarson.garson_adi,
+        garson_adi: garsonName,
         urunler: currentEditItems.map(i => ({
             urun_id: i.urun_id,
             adet: i.adet,
@@ -965,13 +975,13 @@ window.saveEditedOrder = async function () {
         if (res.ok) {
             closeEditOrderModal();
             loadWaiterData();
-            showWaiterToast(`✏️ Sipariş ${activeGarson.garson_adi} tarafından güncellendi!`);
+            showWaiterToast(`✏️ Sipariş ${garsonName} tarafından güncellendi!`);
         } else {
             const errData = await res.json().catch(() => ({}));
-            alert(errData.detail || "Sipariş güncelleme başarısız.");
+            showWaiterToast("⚠️ " + (errData.detail || "Sipariş güncelleme başarısız."));
         }
     } catch (e) {
-        alert("Sunucu bağlantı hatası. Lütfen ağınızı kontrol edin.");
+        showWaiterToast("⚠️ Sunucu bağlantı hatası. Lütfen ağınızı kontrol edin.");
     }
 };
 
