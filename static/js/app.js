@@ -224,8 +224,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.getElementById('languageModal').classList.add('active');
     }
 
-    loadCategories();
-    loadProducts();
+    await loadMenuData();
     checkActiveOrder(); // F5 RECOVERY: Sayfa yenilendiğinde aktif siparişi getirir!
 
     // Socket.io Canlı Dinleyici (Otomatik Reconnection Ayarları)
@@ -483,28 +482,28 @@ function selectLanguage(lang) {
     showToast(lang === 'tr' ? 'Menü Türkçe olarak ayarlandı.' : 'Menu set to English.');
 }
 
-async function loadCategories() {
+async function loadMenuData() {
     try {
-        const res = await fetch('/api/kategoriler');
-        state.kategoriler = await res.json();
+        const [catRes, prodRes] = await Promise.all([
+            fetch('/api/kategoriler'),
+            fetch('/api/urunler')
+        ]);
+        state.kategoriler = await catRes.json();
+        state.urunler = await prodRes.json();
+
         if (state.kategoriler.length > 0 && !state.activeKategoriId) {
             state.activeKategoriId = state.kategoriler[0].id;
         }
+
         renderCategoryGrid();
+        renderProducts();
     } catch (e) {
-        console.error("Kategoriler yüklenemedi:", e);
+        console.error("Menü verileri yüklenemedi:", e);
     }
 }
 
-async function loadProducts() {
-    try {
-        const res = await fetch('/api/urunler');
-        state.urunler = await res.json();
-        renderProducts();
-    } catch (e) {
-        console.error("Ürünler yüklenemedi:", e);
-    }
-}
+async function loadCategories() { return loadMenuData(); }
+async function loadProducts() { return loadMenuData(); }
 
 // DİKEY KATEGORİ SİDEBARI RENDER
 function renderCategoryGrid() {
@@ -540,8 +539,12 @@ function renderProducts() {
     const grid = document.getElementById('productGrid');
     if (!grid) return;
 
-    if (state.urunler.length === 0) {
+    if (!state.urunler || state.urunler.length === 0) {
         grid.innerHTML = `<div style="text-align: center; color: var(--text-secondary); padding: 40px; background: rgba(255,255,255,0.02); border-radius: 16px; border: 1px dashed var(--border-color);">Bu kategoride henüz ürün bulunmuyor.</div>`;
+        return;
+    }
+
+    if (!state.kategoriler || state.kategoriler.length === 0) {
         return;
     }
 
@@ -554,13 +557,29 @@ function renderProducts() {
         };
     });
 
-    const uncategorized = [];
-
     state.urunler.forEach(prod => {
-        if (prod.kategori_id && grouped[prod.kategori_id]) {
-            grouped[prod.kategori_id].products.push(prod);
-        } else {
-            uncategorized.push(prod);
+        let matchedCatId = null;
+
+        // 1. Kategori ID eşleşmesi (Type-safe parseInt / string)
+        if (prod.kategori_id !== undefined && prod.kategori_id !== null) {
+            const prodCatId = parseInt(prod.kategori_id);
+            const foundCat = state.kategoriler.find(c => parseInt(c.id) === prodCatId || String(c.id) === String(prod.kategori_id));
+            if (foundCat) matchedCatId = foundCat.id;
+        }
+
+        // 2. Kategori adı eşleşmesi (Fallback)
+        if (!matchedCatId && prod.kategori_adi) {
+            const foundCat = state.kategoriler.find(c => c.kategori_adi.trim().toLowerCase() === prod.kategori_adi.trim().toLowerCase());
+            if (foundCat) matchedCatId = foundCat.id;
+        }
+
+        // 3. Eşleşme sağlanamazsa ilk kategoriye yerleştir
+        if (!matchedCatId && state.kategoriler.length > 0) {
+            matchedCatId = state.kategoriler[0].id;
+        }
+
+        if (matchedCatId && grouped[matchedCatId]) {
+            grouped[matchedCatId].products.push(prod);
         }
     });
 
@@ -588,23 +607,6 @@ function renderProducts() {
             </div>
         `;
     });
-
-    if (uncategorized.length > 0) {
-        html += `
-            <div class="category-section" id="cat-section-other" data-cat-id="other">
-                <div class="category-section-title">
-                    <h2>🍴 Diğer Ürünler</h2>
-                </div>
-                <div class="category-products-list">
-        `;
-        uncategorized.forEach(prod => {
-            html += renderProductCardHTML(prod);
-        });
-        html += `
-                </div>
-            </div>
-        `;
-    }
 
     grid.innerHTML = html;
     initCategoryIntersectionObserver();
