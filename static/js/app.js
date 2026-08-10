@@ -437,7 +437,7 @@ function updateCategoryHeaderTitle(catId) {
     }
 }
 
-let isTrackingCollapsed = false;
+let isTrackingCollapsed = true;
 
 function toggleTrackingUI() {
     isTrackingCollapsed = !isTrackingCollapsed;
