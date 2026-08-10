@@ -310,6 +310,7 @@ window.closeMasaDetayView = function () {
 
 window.toggleRowSelection = function (index) {
     if (currentTableItems[index]) {
+        if (currentTableItems[index].isFullyPaid) return;
         currentTableItems[index].selected = !currentTableItems[index].selected;
         renderActiveTicketWorkstation();
     }
@@ -471,7 +472,8 @@ function renderActiveTicketWorkstation() {
             Object.keys(groupedMap).forEach(key => {
                 const grp = groupedMap[key];
                 const uniqueId = `item_grp_${grp.urun_id}_${itemIndex}`;
-                const wasSelected = selectedStateMap[uniqueId] || false;
+                const isFullyPaid = (grp.unpaid_adet === 0 && grp.paid_adet > 0);
+                const wasSelected = isFullyPaid ? false : (selectedStateMap[uniqueId] || false);
                 const wasIkram = ikramStateMap[uniqueId] || false;
 
                 const itemObj = {
@@ -485,15 +487,18 @@ function renderActiveTicketWorkstation() {
                     unpaid_adet: grp.unpaid_adet,
                     paid_adet: grp.paid_adet,
                     selected: wasSelected,
-                    isIkram: wasIkram
+                    isIkram: wasIkram,
+                    isFullyPaid: isFullyPaid
                 };
                 currentTableItems.push(itemObj);
 
-                if (grp.unpaid_adet > 0) {
-                    if (!wasIkram) grandTotalSum += grp.toplam_ara;
-                } else {
-                    alreadyPaidSum += grp.toplam_ara;
+                const lineTotal = parseFloat(grp.toplam_ara) || 0;
+                const paidLineSum = (grp.paid_adet || 0) * (parseFloat(grp.birim_fiyat) || 0);
+
+                if (!wasIkram) {
+                    grandTotalSum += lineTotal;
                 }
+                alreadyPaidSum += paidLineSum;
 
                 let sublinesHtml = '';
                 grp.orders_list.forEach(sub => {
@@ -508,12 +513,17 @@ function renderActiveTicketWorkstation() {
                 const isExpanded = expandedGroupDetailsMap[key] || false;
 
                 rowsHtml += `
-                    <tr class="ticket-row-clickable ${wasSelected ? 'selected-row' : ''}" onclick="toggleRowSelection(${itemIndex})">
+                    <tr class="ticket-row-clickable ${wasSelected ? 'selected-row' : ''} ${isFullyPaid ? 'paid-row-disabled' : ''}" 
+                        ${isFullyPaid ? 'style="opacity: 0.55; background: rgba(15,23,42,0.4); cursor: not-allowed;"' : `onclick="toggleRowSelection(${itemIndex})"`}>
                         <td style="padding:10px 8px;">
                             <div style="display:flex; align-items:center; gap:8px;">
-                                <input type="checkbox" ${wasSelected ? 'checked' : ''} onclick="event.stopPropagation(); toggleRowSelection(${itemIndex})" style="width:18px; height:18px; cursor:pointer;">
+                                <input type="checkbox" ${isFullyPaid ? 'disabled' : (wasSelected ? 'checked' : '')} 
+                                    ${isFullyPaid ? '' : `onclick="event.stopPropagation(); toggleRowSelection(${itemIndex})"`} 
+                                    style="width:18px; height:18px; cursor:${isFullyPaid ? 'not-allowed' : 'pointer'};">
                                 <div>
-                                    <strong style="color:#fff; font-size:0.95rem;">${grp.urun_adi}</strong>
+                                    <strong style="color:${isFullyPaid ? '#94a3b8' : '#fff'}; font-size:0.95rem; ${isFullyPaid ? 'text-decoration: line-through;' : ''}">
+                                        ${grp.urun_adi}
+                                    </strong>
                                     ${grp.urun_notu ? `<div style="font-size:0.75rem; color:#f59e0b; font-style:italic;">📝 ${grp.urun_notu}</div>` : ''}
                                     <button type="button" id="btnAyrintilar_${key}" class="btn-ayrintilar-chip" onclick="toggleGroupDetails('${key}', event)">
                                         ${isExpanded ? '▲ Gizle' : '🔍 Ayrıntılar'}
@@ -525,12 +535,16 @@ function renderActiveTicketWorkstation() {
                                 ${sublinesHtml}
                             </div>
                         </td>
-                        <td style="text-align:center; font-weight:800; font-size:1rem; color:#cbd5e1;">${grp.toplam_adet}</td>
-                        <td style="text-align:right; font-weight:700; color:#cbd5e1;">${grp.birim_fiyat.toFixed(2)} ₺</td>
+                        <td style="text-align:center; font-weight:800; font-size:1rem; color:#cbd5e1; ${isFullyPaid ? 'text-decoration: line-through;' : ''}">${grp.toplam_adet}</td>
+                        <td style="text-align:right; font-weight:700; color:#cbd5e1; ${isFullyPaid ? 'text-decoration: line-through;' : ''}">${grp.birim_fiyat.toFixed(2)} ₺</td>
                         <td style="text-align:right;">
-                            ${wasIkram ? `<span style="background:rgba(239,68,68,0.2); color:#f87171; padding:2px 6px; border-radius:4px; font-weight:800; font-size:0.75rem;">🎁 İKRAM</span>` : `<span style="color:#64748b;">-</span>`}
+                            ${isFullyPaid 
+                                ? `<span style="background:rgba(16,185,129,0.2); color:#34d399; border:1px solid rgba(16,185,129,0.4); padding:3px 8px; border-radius:6px; font-size:0.8rem; font-weight:800;">✅ ÖDENDİ</span>` 
+                                : (wasIkram 
+                                    ? `<span style="background:rgba(239,68,68,0.2); color:#f87171; padding:2px 6px; border-radius:4px; font-weight:800; font-size:0.75rem;">🎁 İKRAM</span>` 
+                                    : `<span style="color:#64748b;">-</span>`)}
                         </td>
-                        <td style="text-align:right; font-weight:900; font-size:1.05rem; color:${wasIkram ? '#f87171' : '#34d399'};">
+                        <td style="text-align:right; font-weight:900; font-size:1.05rem; color:${isFullyPaid ? '#64748b' : (wasIkram ? '#f87171' : '#34d399')}; ${isFullyPaid ? 'text-decoration: line-through;' : ''}">
                             ${wasIkram ? '0.00 ₺' : `${grp.toplam_ara.toFixed(2)} ₺`}
                         </td>
                     </tr>
@@ -899,13 +913,18 @@ window.fillDualAmount = function (type) {
 
 window.toggleItemSelection = function (index) {
     if (currentTableItems[index]) {
+        if (currentTableItems[index].isFullyPaid) return;
         currentTableItems[index].selected = !currentTableItems[index].selected;
         renderActiveTicketWorkstation();
     }
 };
 
 window.toggleSelectAllItems = function (isChecked) {
-    currentTableItems.forEach(item => item.selected = isChecked);
+    currentTableItems.forEach(item => {
+        if (!item.isFullyPaid) {
+            item.selected = isChecked;
+        }
+    });
     renderActiveTicketWorkstation();
 };
 
