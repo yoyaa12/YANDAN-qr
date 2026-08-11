@@ -42,3 +42,7 @@ check_git_leaks.py
 move_tools.py
 git_leak_report.txt
 
+# Documentation
+docs/
+
+
