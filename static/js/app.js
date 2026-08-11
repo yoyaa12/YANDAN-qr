@@ -197,6 +197,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 showSecurityError(verifyData.message || "Süresi dolmuş QR kod! Lütfen masadaki ekranı yenileyip güncel kodu okutun.");
                 return;
             }
+            if (verifyData.session_token) {
+                localStorage.setItem('qr_session_token_' + state.masaId, verifyData.session_token);
+            }
         } catch (e) {
             showSecurityError("Güvenlik doğrulaması yapılamadı. Sunucuya ulaşılamıyor.");
             return;
@@ -1457,10 +1460,16 @@ async function executeOrderSubmit(odemeYontemi) {
         payload.current_totp_token = state.currentTotpToken;
     }
 
+    const sessionToken = localStorage.getItem('qr_session_token_' + state.masaId);
+    const headers = { 'Content-Type': 'application/json' };
+    if (sessionToken) {
+        headers['Authorization'] = 'Bearer ' + sessionToken;
+    }
+
     try {
         const res = await fetch('/api/siparisler', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: headers,
             body: JSON.stringify(payload)
         });
 
