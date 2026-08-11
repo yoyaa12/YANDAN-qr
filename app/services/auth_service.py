@@ -1,6 +1,6 @@
 from fastapi import Depends, HTTPException
 from app.repositories.auth_repo import AuthRepository
-from app.schemas.schemas import LoginModel, GarsonPinVerifyModel, KullaniciResponse
+from app.schemas.auth import GarsonPinVerifyModel, KullaniciResponse, LoginModel
 from typing import List
 
 class AuthService:

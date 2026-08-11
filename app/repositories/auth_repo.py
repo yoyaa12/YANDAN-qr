@@ -1,5 +1,6 @@
 from fastapi import Depends
 from app.database import DatabaseSession, get_db
+from app.enums import UserRole
 
 class AuthRepository:
     def __init__(self, db: DatabaseSession = Depends(get_db)):
@@ -14,8 +15,8 @@ class AuthRepository:
         return self.db.execute_query(query, (pin_code,), fetch_one=True)
 
     def get_all_garsonlar(self):
-        query = "SELECT id, kullanici_adi AS garson_adi FROM Kullanicilar WHERE rol = 'garson' ORDER BY kullanici_adi ASC"
-        return self.db.execute_query(query) or []
+        query = "SELECT id, kullanici_adi AS garson_adi FROM Kullanicilar WHERE rol = ? ORDER BY kullanici_adi ASC"
+        return self.db.execute_query(query, (UserRole.WAITER.value,)) or []
 
     def get_banned_device(self, device_id: str):
         return self.db.execute_query("SELECT id FROM BannedDevices WHERE device_id = ?", (device_id,), fetch_one=True)

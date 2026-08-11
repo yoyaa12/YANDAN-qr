@@ -2,6 +2,8 @@
 // WAITER PANEL (GARSON PANELİ) LOGIC (GÜNCELLENMİŞ - 6 HANELİ PIN DESTEKLİ)
 // ==========================================================================
 
+const escapeHtml = window.SecurityText.escapeHtml;
+
 let waiterOrders = [];
 let allRawOrders = [];
 let tables = [];
@@ -11,18 +13,24 @@ let pendingActionCallback = null;
 let activeBrowsingTables = {}; // { masa_id: { masa_no: 'Masa 1', time: Date.now() } }
 let activeDetailMasaId = null;
 
+function toPositiveInteger(value) {
+    const parsed = Number(value);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 function getFormattedMasaNo(masa_no) {
-    if (!masa_no) return '';
-    if (masa_no.startsWith('Masa ')) {
-        return 'S-' + masa_no.substring(5);
-    } else if (masa_no.startsWith('Salon ')) {
-        return 'S-' + masa_no.substring(6);
-    } else if (masa_no.startsWith('Bahçe ')) {
-        return 'B-' + masa_no.substring(6);
-    } else if (masa_no.startsWith('S-') || masa_no.startsWith('B-')) {
-        return masa_no;
+    if (masa_no === null || masa_no === undefined) return '';
+    const masaNo = String(masa_no);
+    if (masaNo.startsWith('Masa ')) {
+        return 'S-' + masaNo.substring(5);
+    } else if (masaNo.startsWith('Salon ')) {
+        return 'S-' + masaNo.substring(6);
+    } else if (masaNo.startsWith('Bahçe ')) {
+        return 'B-' + masaNo.substring(6);
+    } else if (masaNo.startsWith('S-') || masaNo.startsWith('B-')) {
+        return masaNo;
     }
-    return masa_no;
+    return masaNo;
 }
 
 function playWaiterBellSound() {
@@ -64,10 +72,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Müşteri QR Menüyü Açtığında (Masa Oturumu Başladı)
     socket.on('garson_musteri_geldi', (data) => {
+        if (!data) return;
         showWaiterToast(`👋 MÜŞTERİ GELDİ! ${data.masa_no} menüyü inceliyor.`);
-        if (data && data.masa_id) {
-            if (!activeBrowsingTables[data.masa_id]) {
-                activeBrowsingTables[data.masa_id] = { masa_no: data.masa_no, time: Date.now(), item_count: 0, last_item: '' };
+        const masaId = toPositiveInteger(data.masa_id);
+        if (masaId !== null) {
+            if (!activeBrowsingTables[masaId]) {
+                activeBrowsingTables[masaId] = { masa_no: data.masa_no, time: Date.now(), item_count: 0, last_item: '' };
             }
             renderWaiterDashboard();
         }
@@ -75,11 +85,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Müşteri Sepete Ürün Eklediğinde
     socket.on('garson_musteri_urun_secti', (data) => {
-        if (data && data.masa_id) {
-            if (data.item_count > 0 && (!activeBrowsingTables[data.masa_id] || activeBrowsingTables[data.masa_id].item_count === 0)) {
+        if (!data) return;
+        const masaId = toPositiveInteger(data.masa_id);
+        if (masaId !== null) {
+            if (data.item_count > 0 && (!activeBrowsingTables[masaId] || activeBrowsingTables[masaId].item_count === 0)) {
                 showWaiterToast(`📖 MENÜ İNCELENİYOR! ${data.masa_no} sepete ürün ekledi (${data.last_item}).`);
             }
-            activeBrowsingTables[data.masa_id] = {
+            activeBrowsingTables[masaId] = {
                 masa_no: data.masa_no,
                 time: Date.now(),
                 item_count: data.item_count,
@@ -360,8 +372,8 @@ function renderWaiterDashboard() {
         .map(o => o.masa_id);
 
     const browsingTableIds = Object.keys(activeBrowsingTables).filter(id => {
-        const masaId = parseInt(id);
-        return !occupiedTableIds.includes(masaId);
+        const masaId = toPositiveInteger(id);
+        return masaId !== null && !occupiedTableIds.includes(masaId);
     });
 
     if (activeOrders.length === 0 && browsingTableIds.length === 0) {
@@ -420,6 +432,9 @@ function renderWaiterDashboard() {
 
     let html = '';
     Object.values(groupedByMasa).forEach(group => {
+        const masaId = toPositiveInteger(group.masa_id);
+        if (masaId === null) return;
+
         let borderStyle = 'border-color: #a855f7; box-shadow: 0 0 15px rgba(168,85,247,0.2);'; // Mutfakta (Purple)
         let statusIcon = '🔥';
         let statusText = 'Mutfakta';
@@ -439,13 +454,15 @@ function renderWaiterDashboard() {
         }
 
         html += `
-            <div class="order-card" style="background: #1e293b; border: 2px solid; ${borderStyle} cursor: pointer; padding: 12px 8px; border-radius: 10px; margin-bottom: 8px; min-height: 80px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center;" onclick="openMasaDetailWithPin(${group.masa_id})">
-                <div class="order-table-title" style="font-size: 1.3rem; font-weight: 800; margin-bottom: 4px;">${getFormattedMasaNo(group.masa_no)}</div>
+            <div class="order-card" style="background: #1e293b; border: 2px solid; ${borderStyle} cursor: pointer; padding: 12px 8px; border-radius: 10px; margin-bottom: 8px; min-height: 80px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center;" onclick="openMasaDetailWithPin(${masaId})">
+                <div class="order-table-title" style="font-size: 1.3rem; font-weight: 800; margin-bottom: 4px;">${escapeHtml(getFormattedMasaNo(group.masa_no))}</div>
             </div>
         `;
     });
 
     browsingTableIds.forEach(id => {
+        const masaId = toPositiveInteger(id);
+        if (masaId === null) return;
         const b = activeBrowsingTables[id];
         const hasCart = b.item_count && b.item_count > 0;
         const formattedMasaNo = getFormattedMasaNo(b.masa_no);
@@ -454,8 +471,8 @@ function renderWaiterDashboard() {
         const text = hasCart ? 'Sepette Ürün' : 'Menü İnceliyor';
 
         html += `
-            <div class="order-card" style="background: #1e293b; border: 2px solid ${color}; box-shadow: 0 0 15px rgba(59,130,246,0.2); cursor: pointer; padding: 12px 8px; border-radius: 10px; margin-bottom: 8px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; gap: 6px; min-height: 80px;" onclick="openMasaDetailWithPin(${id})">
-                <div style="font-weight: 800; font-size: 1.3rem; color: #fff;">${formattedMasaNo}</div>
+            <div class="order-card" style="background: #1e293b; border: 2px solid ${color}; box-shadow: 0 0 15px rgba(59,130,246,0.2); cursor: pointer; padding: 12px 8px; border-radius: 10px; margin-bottom: 8px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; gap: 6px; min-height: 80px;" onclick="openMasaDetailWithPin(${masaId})">
+                <div style="font-weight: 800; font-size: 1.3rem; color: #fff;">${escapeHtml(formattedMasaNo)}</div>
             </div>
         `;
     });
@@ -477,6 +494,8 @@ window.closeMasaDetailModal = function () {
 };
 
 function openMasaDetail(masaId) {
+    masaId = toPositiveInteger(masaId);
+    if (masaId === null) return;
     activeDetailMasaId = masaId;
     const activeOrders = allRawOrders.filter(o => o.masa_id == masaId && o.siparis_durumu !== 'iptal' && o.siparis_durumu !== 'odendi_kapatildi');
     const hasBrowsing = activeBrowsingTables[masaId] !== undefined;
@@ -534,8 +553,8 @@ function openMasaDetail(masaId) {
             html += `
                 <div style="display: flex; justify-content: space-between; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 4px;">
                     <div>
-                        <div style="font-weight: 700; color:#e5e7eb;">${item.adet}x ${item.urun_adi}</div>
-                        ${item.urun_notu ? `<div style="font-size: 0.75rem; color:#9ca3af;">Not: ${item.urun_notu}</div>` : ''}
+                        <div style="font-weight: 700; color:#e5e7eb;">${item.adet}x ${escapeHtml(item.urun_adi)}</div>
+                        ${item.urun_notu ? `<div style="font-size: 0.75rem; color:#9ca3af;">Not: ${escapeHtml(item.urun_notu)}</div>` : ''}
                     </div>
                     ${!hasPendingApproval ? `<div style="font-weight: bold; color: #fbbf24;">${item.ara_toplam.toFixed(2)} ₺</div>` : ''}
                 </div>
@@ -545,17 +564,18 @@ function openMasaDetail(masaId) {
     }
 
     // Devices / Ban logic
+    const detailDeviceIds = Array.from(deviceIds, deviceId => String(deviceId));
     if (deviceIds.size > 0) {
         html += `<div style="margin-bottom: 15px;">
             <div style="font-size:0.85rem; color:#9ca3af; margin-bottom: 4px;">Bağlı Cihazlar:</div>
             <div style="display:flex; flex-wrap:wrap; gap:8px;">
         `;
-        Array.from(deviceIds).forEach(did => {
+        detailDeviceIds.forEach((did, deviceIndex) => {
             const shortDid = did.includes('-') ? did.split('-')[1].substring(0, 4).toUpperCase() : did.substring(0, 4).toUpperCase();
             html += `
                 <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); padding: 4px 8px; border-radius: 6px; display:flex; align-items:center; gap: 8px;">
-                    <span style="font-size:0.8rem; color:#fca5a5;">Cihaz: ${shortDid}</span>
-                    <button onclick="banDeviceDirect('${did}', ${masaId})" style="background: #ef4444; border:none; color:#fff; padding: 4px 8px; font-size:0.7rem; border-radius:4px; font-weight:bold; cursor:pointer;">BANLA</button>
+                    <span style="font-size:0.8rem; color:#fca5a5;">Cihaz: ${escapeHtml(shortDid)}</span>
+                    <button type="button" class="js-ban-device" data-device-index="${deviceIndex}" style="background: #ef4444; border:none; color:#fff; padding: 4px 8px; font-size:0.7rem; border-radius:4px; font-weight:bold; cursor:pointer;">BANLA</button>
                 </div>
             `;
         });
@@ -601,6 +621,15 @@ function openMasaDetail(masaId) {
     html += `</div>`;
 
     content.innerHTML = html;
+    content.querySelectorAll('.js-ban-device').forEach(button => {
+        button.addEventListener('click', () => {
+            const deviceIndex = Number(button.dataset.deviceIndex);
+            const deviceId = detailDeviceIds[deviceIndex];
+            if (deviceId !== undefined) {
+                window.banDeviceDirect(deviceId, masaId);
+            }
+        });
+    });
     document.getElementById('masaDetailModal').classList.add('active');
 }
 
@@ -850,7 +879,9 @@ function populateEditProductSelect() {
     if (!select) return;
     let html = '<option value="">-- Menüden Ürün Seçiniz --</option>';
     allMenuProducts.forEach(p => {
-        html += `<option value="${p.id}">${p.urun_adi} (${p.fiyat.toFixed(2)} ₺)</option>`;
+        const productId = toPositiveInteger(p.id);
+        if (productId === null) return;
+        html += `<option value="${productId}">${escapeHtml(p.urun_adi)} (${p.fiyat.toFixed(2)} ₺)</option>`;
     });
     select.innerHTML = html;
 }
@@ -871,10 +902,10 @@ function renderEditOrderItems() {
             html += `
                 <div class="order-item-row" style="padding: 10px 0; border-bottom: 1px dashed rgba(255,255,255,0.08);">
                     <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <span style="font-weight:700;">${item.urun_adi}</span>
+                        <span style="font-weight:700;">${escapeHtml(item.urun_adi)}</span>
                         <span style="font-weight:800; color:#fbbf24;">${araToplam.toFixed(2)} ₺</span>
                     </div>
-                    ${item.urun_notu ? `<div style="font-size:0.75rem; color:var(--text-secondary); margin-top:2px;">${item.urun_notu}</div>` : ''}
+                    ${item.urun_notu ? `<div style="font-size:0.75rem; color:var(--text-secondary); margin-top:2px;">${escapeHtml(item.urun_notu)}</div>` : ''}
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px;">
                         <div style="display:flex; align-items:center; gap:6px;">
                             <button type="button" onclick="changeEditItemQty(${index}, -1)" style="width:32px; height:32px; font-weight:800; border-radius:var(--radius-sm); background:rgba(255,255,255,0.12); border:1px solid var(--border-color); color:#fff; cursor:pointer;">-</button>
@@ -990,7 +1021,7 @@ function updateActiveGarsonBadge() {
     const logoutBtn = document.getElementById('garsonLogoutBtn');
     if (activeGarson) {
         if (badge) {
-            badge.innerHTML = `👤 ${activeGarson.garson_adi}`;
+            badge.textContent = `👤 ${activeGarson.garson_adi}`;
             badge.style.background = 'rgba(16, 185, 129, 0.15)';
             badge.style.color = '#34d399';
             badge.style.borderColor = 'rgba(16, 185, 129, 0.4)';
@@ -998,7 +1029,7 @@ function updateActiveGarsonBadge() {
         if (logoutBtn) logoutBtn.style.display = 'block';
     } else {
         if (badge) {
-            badge.innerHTML = `🔑 Giriş Yapılmadı`;
+            badge.textContent = `🔑 Giriş Yapılmadı`;
             badge.style.background = 'rgba(99, 102, 241, 0.15)';
             badge.style.color = '#a5b4fc';
             badge.style.borderColor = 'rgba(99, 102, 241, 0.4)';

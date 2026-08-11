@@ -1,10 +1,13 @@
 from fastapi import APIRouter, Depends
 from typing import List
 from app.services.auth_service import AuthService
-from app.schemas.schemas import (
-    GarsonPinVerifyModel, BanDeviceModel,
-    GarsonPinResponse, KullaniciResponse, GenelBasariliResponse
+from app.schemas.auth import (
+    BanDeviceModel,
+    GarsonPinResponse,
+    GarsonPinVerifyModel,
+    KullaniciResponse,
 )
+from app.schemas.common import GenelBasariliResponse
 
 router = APIRouter()
 

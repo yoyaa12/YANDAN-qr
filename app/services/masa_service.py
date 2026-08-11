@@ -1,7 +1,7 @@
 from fastapi import Depends
 from typing import List, Optional
 from app.repositories.masa_repo import MasaRepository
-from app.schemas.schemas import MasaEkleModel, MasaResponse, QRDogrulamaResponse
+from app.schemas.tables import MasaEkleModel, MasaResponse, QRDogrulamaResponse
 from app.database import db_transaction
 from app.core.totp_service import generate_secret_key, generate_dynamic_token, get_seconds_remaining, verify_dynamic_token
 from app.core.socket_manager import get_browsing_tables

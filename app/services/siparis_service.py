@@ -5,12 +5,13 @@ from typing import Optional, List
 
 from app.core.events import event_bus
 from app.core.socket_manager import clear_browsing_table
+from app.enums import OrderAction, OrderStatus, PaymentMethod, PaymentStatus, TableStatus
 from app.repositories.siparis_repo import SiparisRepository
 from app.repositories.masa_repo import MasaRepository
 from app.repositories.urun_repo import UrunRepository
 from app.repositories.auth_repo import AuthRepository
-from app.schemas.schemas import SiparisOlusturModel, DurumGuncelleModel, SiparisDuzenleModel
-from app.schemas.schemas import SiparisResponse, SiparisDetayResponse, SiparisDurumResponse
+from app.schemas.orders import DurumGuncelleModel, SiparisDuzenleModel, SiparisOlusturModel
+from app.schemas.orders import SiparisDurumResponse, SiparisResponse
 from app.database import db_transaction
 
 def sanitize_for_json(data):
@@ -40,15 +41,19 @@ class SiparisService:
         self.urun_repo = urun_repo
         self.auth_repo = auth_repo
 
-    def _determine_initial_status(self, odeme_yontemi: str):
-        odeme_durumu = "odendi" if odeme_yontemi == "pos" else "bekliyor"
+    def _determine_initial_status(self, odeme_yontemi: PaymentMethod):
+        odeme_durumu = (
+            PaymentStatus.PAID.value
+            if odeme_yontemi == PaymentMethod.POS
+            else PaymentStatus.PENDING.value
+        )
         
-        if odeme_yontemi == "pos":
-            siparis_durumu = "odendi_mutfakta"
-        elif odeme_yontemi == "garson_kasada":
-            siparis_durumu = "garson_onayi_bekliyor"
+        if odeme_yontemi == PaymentMethod.POS:
+            siparis_durumu = OrderStatus.PAID_IN_KITCHEN.value
+        elif odeme_yontemi == PaymentMethod.WAITER_AT_CASHIER:
+            siparis_durumu = OrderStatus.WAITER_APPROVAL_PENDING.value
         else:
-            siparis_durumu = "nakit_bekliyor"
+            siparis_durumu = OrderStatus.CASH_PENDING.value
             
         return odeme_durumu, siparis_durumu
 
@@ -76,13 +81,16 @@ class SiparisService:
         return detaylar
 
     async def _publish_order_events(self, data: SiparisOlusturModel, siparis_id: int, masa_no: str, order_dict: dict):
-        if data.odeme_yontemi == "pos":
+        if data.odeme_yontemi == PaymentMethod.POS:
             await event_bus.publish("yeni_siparis", order_dict)
 
-        await event_bus.publish("masa_durumu_degisti", {"masa_id": data.masa_id, "durum": "dolu"})
+        await event_bus.publish(
+            "masa_durumu_degisti",
+            {"masa_id": data.masa_id, "durum": TableStatus.OCCUPIED.value},
+        )
         await event_bus.publish("durum_guncellendi", order_dict)
         
-        if data.odeme_yontemi == "garson_kasada":
+        if data.odeme_yontemi == PaymentMethod.WAITER_AT_CASHIER:
             await event_bus.publish("garson_onay_talebi", {
                 "siparis_id": siparis_id,
                 "masa_id": data.masa_id,
@@ -90,7 +98,7 @@ class SiparisService:
                 "toplam_tutar": data.toplam_tutar,
                 "siparis": order_dict
             })
-        elif data.odeme_yontemi == "nakit":
+        elif data.odeme_yontemi == PaymentMethod.CASH:
             await event_bus.publish("nakit_odeme_talebi", {
                 "siparis_id": siparis_id,
                 "masa_id": data.masa_id,
@@ -113,7 +121,7 @@ class SiparisService:
             if not masa:
                 raise HTTPException(status_code=404, detail="Geçersiz masa ID!")
 
-            if masa.get('durum') == 'bos':
+            if masa.get('durum') == TableStatus.EMPTY.value:
                 if not data.current_totp_token:
                     raise HTTPException(status_code=403, detail="Masa şu an BOŞ. İlk siparişi vermek için lütfen masadaki ekranın altında yazan 6 haneli güvenlik kodunu okutun.")
                 
@@ -126,13 +134,18 @@ class SiparisService:
             odeme_durumu, siparis_durumu = self._determine_initial_status(data.odeme_yontemi)
 
             siparis_id = self.siparis_repo.create_siparis(
-                data.masa_id, siparis_kodu, data.toplam_tutar, odeme_durumu, siparis_durumu, data.device_id
+                data.masa_id,
+                siparis_kodu,
+                data.toplam_tutar,
+                odeme_durumu,
+                siparis_durumu,
+                data.device_id,
             )
 
             if not siparis_id:
                 raise HTTPException(status_code=500, detail="Sipariş veritabanına eklenirken hata oluştu.")
 
-            self.masa_repo.update_durum(data.masa_id, 'dolu')
+            self.masa_repo.update_durum(data.masa_id, TableStatus.OCCUPIED.value)
             detaylar = self._process_order_items(siparis_id, data.urunler)
             clear_browsing_table(data.masa_id)
 
@@ -142,7 +155,7 @@ class SiparisService:
                 "masa_no": masa['masa_no'],
                 "siparis_kodu": siparis_kodu,
                 "toplam_tutar": data.toplam_tutar,
-                "odeme_yontemi": data.odeme_yontemi,
+                "odeme_yontemi": data.odeme_yontemi.value,
                 "odeme_durumu": odeme_durumu,
                 "siparis_durumu": siparis_durumu,
                 "olusturma_tarihi": datetime.datetime.now().strftime("%H:%M:%S"),
@@ -152,7 +165,12 @@ class SiparisService:
             }
             full_order = SiparisResponse.model_validate(full_order_dict)
 
-        await self._publish_order_events(data, siparis_id, masa['masa_no'], full_order.model_dump())
+        await self._publish_order_events(
+            data,
+            siparis_id,
+            masa['masa_no'],
+            full_order.model_dump(mode="json"),
+        )
         return full_order
 
     def _map_to_siparis_response(self, order_dict: dict) -> SiparisResponse:
@@ -183,8 +201,8 @@ class SiparisService:
             genel_toplam = sum(s.toplam_tutar for s in s_dtos if s.toplam_tutar)
             res = {
                 "has_active": True,
-                "siparisler": [s.model_dump() for s in s_dtos],
-                "siparis": s_dtos[-1].model_dump(),
+                "siparisler": [s.model_dump(mode="json") for s in s_dtos],
+                "siparis": s_dtos[-1].model_dump(mode="json"),
                 "genel_toplam": genel_toplam
             }
         else:
@@ -197,7 +215,7 @@ class SiparisService:
         return res
 
     async def update_siparis_durumu(self, siparis_id: int, data: DurumGuncelleModel) -> SiparisDurumResponse:
-        yeni_durum = data.yeni_durum.lower()
+        yeni_durum = data.yeni_durum.value
         garson_adi = data.garson_adi or "Garson Berat"
         masa_bosaldi = False
 
@@ -206,17 +224,30 @@ class SiparisService:
             if not s_info:
                 raise HTTPException(status_code=404, detail="Sipariş bulunamadı!")
 
-            if yeni_durum in ["nakit_tahsil_edildi", "odendi_kapatildi"]:
-                self.siparis_repo.update_odeme_and_durum(siparis_id, "odendi", "teslim_edildi", garson_adi)
-                yeni_durum = "teslim_edildi"
+            if yeni_durum in [OrderAction.CASH_COLLECTED.value, OrderStatus.PAID_CLOSED.value]:
+                self.siparis_repo.update_odeme_and_durum(
+                    siparis_id,
+                    PaymentStatus.PAID.value,
+                    OrderStatus.DELIVERED.value,
+                    garson_adi,
+                )
+                yeni_durum = OrderStatus.DELIVERED.value
             else:
-                self.siparis_repo.update_durum(siparis_id, yeni_durum, garson_adi if yeni_durum in ['garson_onayladi_mutfakta', 'teslim_edildi'] else None)
+                staff_name_statuses = {
+                    OrderStatus.WAITER_APPROVED_IN_KITCHEN.value,
+                    OrderStatus.DELIVERED.value,
+                }
+                self.siparis_repo.update_durum(
+                    siparis_id,
+                    yeni_durum,
+                    garson_adi if yeni_durum in staff_name_statuses else None,
+                )
 
-            if yeni_durum in ["teslim_edildi", "iptal"]:
+            if yeni_durum in [OrderStatus.DELIVERED.value, OrderStatus.CANCELLED.value]:
                 aktif_sayi = self.siparis_repo.get_active_count_for_masa(s_info['masa_id'])
                 unpaid_sayi = self.siparis_repo.get_unpaid_count_for_masa(s_info['masa_id'])
                 if aktif_sayi == 0 and unpaid_sayi == 0:
-                    self.masa_repo.update_durum(s_info['masa_id'], 'bos')
+                    self.masa_repo.update_durum(s_info['masa_id'], TableStatus.EMPTY.value)
                     clear_browsing_table(s_info['masa_id'])
                     masa_bosaldi = True
 
@@ -232,19 +263,25 @@ class SiparisService:
                 masa_id=s_info['masa_id'],
                 masa_no=s_info['masa_no'],
                 yeni_durum=yeni_durum,
-                odeme_durumu=updated_order.get("odeme_durumu", "odendi"),
+                odeme_durumu=updated_order.get("odeme_durumu", PaymentStatus.PAID.value),
                 garson_adi=garson_adi,
                 guncelleme_tarihi=datetime.datetime.now().strftime("%H:%M:%S"),
                 siparis=s_dto
             )
 
-        payload_dict = event_payload.model_dump()
-        s_dto_dict = s_dto.model_dump()
+        payload_dict = event_payload.model_dump(mode="json")
+        s_dto_dict = s_dto.model_dump(mode="json")
 
         if masa_bosaldi:
-            await event_bus.publish("masa_durumu_degisti", {"masa_id": s_info['masa_id'], "durum": "bos"})
+            await event_bus.publish(
+                "masa_durumu_degisti",
+                {"masa_id": s_info['masa_id'], "durum": TableStatus.EMPTY.value},
+            )
 
-        if data.yeni_durum in ["nakit_tahsil_edildi", "garson_onayladi_mutfakta"]:
+        if data.yeni_durum.value in [
+            OrderAction.CASH_COLLECTED.value,
+            OrderStatus.WAITER_APPROVED_IN_KITCHEN.value,
+        ]:
             await event_bus.publish("yeni_siparis", s_dto_dict)
             await event_bus.publish("nakit_odendi", payload_dict)
 
@@ -253,7 +290,7 @@ class SiparisService:
 
     async def clear_masa(self, masa_id: int):
         with db_transaction():
-            self.masa_repo.update_durum(masa_id, 'bos')
+            self.masa_repo.update_durum(masa_id, TableStatus.EMPTY.value)
             self.siparis_repo.clear_active_orders_for_masa(masa_id)
             clear_browsing_table(masa_id)
             TABLE_MOVES_MAP.pop(masa_id, None)
@@ -261,10 +298,13 @@ class SiparisService:
                 if v == masa_id:
                     TABLE_MOVES_MAP.pop(k, None)
         
-        event_payload = {"masa_id": masa_id, "durum": "bos"}
+        event_payload = {"masa_id": masa_id, "durum": TableStatus.EMPTY.value}
         await event_bus.publish("masa_durumu_degisti", event_payload)
         await event_bus.publish("masa_temizlendi", {"masa_id": masa_id})
-        await event_bus.publish("durum_guncellendi", {"masa_id": masa_id, "yeni_durum": "bos"})
+        await event_bus.publish(
+            "durum_guncellendi",
+            {"masa_id": masa_id, "yeni_durum": TableStatus.EMPTY.value},
+        )
 
     async def update_siparis_items(self, siparis_id: int, data: SiparisDuzenleModel) -> SiparisResponse:
         garson_adi = data.garson_adi or "Garson Berat"
@@ -283,11 +323,13 @@ class SiparisService:
                 "siparis_id": siparis_id,
                 "masa_id": s_info['masa_id'],
                 "masa_no": s_info['masa_no'],
-                "yeni_durum": s_info.get("siparis_durumu", "garson_onayi_bekliyor"),
-                "odeme_durumu": s_info.get("odeme_durumu", "bekliyor"),
+                "yeni_durum": s_info.get(
+                    "siparis_durumu", OrderStatus.WAITER_APPROVAL_PENDING.value
+                ),
+                "odeme_durumu": s_info.get("odeme_durumu", PaymentStatus.PENDING.value),
                 "garson_adi": garson_adi,
                 "guncelleme_tarihi": datetime.datetime.now().strftime("%H:%M:%S"),
-                "siparis": s_dto.model_dump()
+                "siparis": s_dto.model_dump(mode="json")
             }
 
         await event_bus.publish("durum_guncellendi", event_payload)
@@ -301,8 +343,8 @@ class SiparisService:
             to_masa = self.masa_repo.get_by_id(to_masa_id)
             to_masa_no = to_masa.get("masa_no", f"Masa {to_masa_id}") if to_masa else f"Masa {to_masa_id}"
             
-            self.masa_repo.update_durum(to_masa_id, 'dolu')
-            self.masa_repo.update_durum(from_masa_id, 'bos')
+            self.masa_repo.update_durum(to_masa_id, TableStatus.OCCUPIED.value)
+            self.masa_repo.update_durum(from_masa_id, TableStatus.EMPTY.value)
             clear_browsing_table(from_masa_id)
             TABLE_MOVES_MAP[from_masa_id] = to_masa_id
         
@@ -314,5 +356,8 @@ class SiparisService:
             "is_move": True
         }
         await event_bus.publish("masa_tasindi", event_payload)
-        await event_bus.publish("masa_durumu_degisti", {"masa_id": to_masa_id, "durum": "dolu", "is_move": True})
+        await event_bus.publish(
+            "masa_durumu_degisti",
+            {"masa_id": to_masa_id, "durum": TableStatus.OCCUPIED.value, "is_move": True},
+        )
         await event_bus.publish("durum_guncellendi", event_payload)

@@ -1,3 +1,5 @@
+const escapeHtml = window.SecurityText.escapeHtml;
+
 let kasaTables = [];
 let kasaOrders = [];
 let kasaDynamicQRs = {};
@@ -13,22 +15,25 @@ let partialPaymentsMap = {};
 // GRUPLANMIŞ ADİSYON (SEÇENEK 1) & AYRINTILAR DURUMU
 let ticketViewMode = 'grouped'; // 'grouped' veya 'batches'
 let expandedGroupDetailsMap = {};
+let renderedGroupKeys = [];
 
 window.setTicketViewMode = function(mode) {
     ticketViewMode = mode;
     renderActiveTicketWorkstation();
 };
 
-window.toggleGroupDetails = function(groupKey, event) {
+window.toggleGroupDetails = function(groupIndex, event) {
     if (event) event.stopPropagation();
+    const groupKey = renderedGroupKeys[groupIndex];
+    if (groupKey === undefined) return;
     expandedGroupDetailsMap[groupKey] = !expandedGroupDetailsMap[groupKey];
-    const box = document.getElementById(`groupDetails_${groupKey}`);
-    const btn = document.getElementById(`btnAyrintilar_${groupKey}`);
+    const box = document.getElementById(`groupDetails_${groupIndex}`);
+    const btn = document.getElementById(`btnAyrintilar_${groupIndex}`);
     if (box) {
         box.style.display = expandedGroupDetailsMap[groupKey] ? 'block' : 'none';
     }
     if (btn) {
-        btn.innerHTML = expandedGroupDetailsMap[groupKey] ? '▲ Gizle' : '🔍 Ayrıntılar';
+        btn.textContent = expandedGroupDetailsMap[groupKey] ? '▲ Gizle' : '🔍 Ayrıntılar';
     }
 };
 
@@ -354,6 +359,7 @@ function renderActiveTicketWorkstation() {
     const badgeEl = document.getElementById('ticketMasaStatusBadge');
     const metaEl = document.getElementById('ticketMetaInfo');
     const tbody = document.getElementById('ticketItemsBody');
+    renderedGroupKeys = [];
 
     if (!table) {
         if (titleEl) titleEl.innerText = "🪑 MASA SEÇİLMEDİ";
@@ -471,6 +477,7 @@ function renderActiveTicketWorkstation() {
 
             Object.keys(groupedMap).forEach(key => {
                 const grp = groupedMap[key];
+                renderedGroupKeys[itemIndex] = key;
                 const uniqueId = `item_grp_${grp.urun_id}_${itemIndex}`;
                 const isFullyPaid = (grp.unpaid_adet === 0 && grp.paid_adet > 0);
                 const wasSelected = isFullyPaid ? false : (selectedStateMap[uniqueId] || false);
@@ -504,7 +511,7 @@ function renderActiveTicketWorkstation() {
                 grp.orders_list.forEach(sub => {
                     sublinesHtml += `
                         <div class="detail-subline ${sub.isPaid ? 'paid-line' : 'unpaid-line'}">
-                            <span>📦 Fiş #${sub.siparis_id} ${sub.timeStr ? `(${sub.timeStr})` : ''} - ${sub.garson_adi}: ${sub.adet} Adet</span>
+                            <span>📦 Fiş #${escapeHtml(sub.siparis_id)} ${sub.timeStr ? `(${escapeHtml(sub.timeStr)})` : ''} - ${escapeHtml(sub.garson_adi)}: ${sub.adet} Adet</span>
                             <strong>${sub.ara.toFixed(2)} ₺ ${sub.isPaid ? '✅ (Ödendi)' : '⏳ (Açık)'}</strong>
                         </div>
                     `;
@@ -522,15 +529,15 @@ function renderActiveTicketWorkstation() {
                                     style="width:18px; height:18px; cursor:${isFullyPaid ? 'not-allowed' : 'pointer'};">
                                 <div>
                                     <strong style="color:${isFullyPaid ? '#94a3b8' : '#fff'}; font-size:0.95rem; ${isFullyPaid ? 'text-decoration: line-through;' : ''}">
-                                        ${grp.urun_adi}
+                                        ${escapeHtml(grp.urun_adi)}
                                     </strong>
-                                    ${grp.urun_notu ? `<div style="font-size:0.75rem; color:#f59e0b; font-style:italic;">📝 ${grp.urun_notu}</div>` : ''}
-                                    <button type="button" id="btnAyrintilar_${key}" class="btn-ayrintilar-chip" onclick="toggleGroupDetails('${key}', event)">
+                                    ${grp.urun_notu ? `<div style="font-size:0.75rem; color:#f59e0b; font-style:italic;">📝 ${escapeHtml(grp.urun_notu)}</div>` : ''}
+                                    <button type="button" id="btnAyrintilar_${itemIndex}" class="btn-ayrintilar-chip" onclick="toggleGroupDetails(${itemIndex}, event)">
                                         ${isExpanded ? '▲ Gizle' : '🔍 Ayrıntılar'}
                                     </button>
                                 </div>
                             </div>
-                            <div id="groupDetails_${key}" class="grouped-details-box" style="display:${isExpanded ? 'block' : 'none'};">
+                            <div id="groupDetails_${itemIndex}" class="grouped-details-box" style="display:${isExpanded ? 'block' : 'none'};">
                                 <div class="grouped-details-header">📋 Fiş & Zaman Ayrıntıları:</div>
                                 ${sublinesHtml}
                             </div>
@@ -575,6 +582,8 @@ function renderActiveTicketWorkstation() {
             let batchesHtml = modeSelectorHtml;
 
             allMasaOrders.forEach((o) => {
+                const orderId = Number(o.id);
+                if (!Number.isInteger(orderId) || orderId <= 0) return;
                 let itemsRows = '';
                 let batchTotal = 0;
 
@@ -587,8 +596,8 @@ function renderActiveTicketWorkstation() {
                     itemsRows += `
                         <tr>
                             <td>
-                                <strong>${d.urun_adi}</strong>
-                                ${d.urun_notu ? `<div style="font-size:0.75rem; color:#f59e0b;">Not: ${d.urun_notu}</div>` : ''}
+                                <strong>${escapeHtml(d.urun_adi)}</strong>
+                                ${d.urun_notu ? `<div style="font-size:0.75rem; color:#f59e0b;">Not: ${escapeHtml(d.urun_notu)}</div>` : ''}
                             </td>
                             <td style="text-align:center;">${adet}</td>
                             <td style="text-align:right;">${bFiyat.toFixed(2)} ₺</td>
@@ -614,8 +623,8 @@ function renderActiveTicketWorkstation() {
                     <div class="batch-card" style="background: rgba(15, 23, 42, 0.85); border: 1.5px solid rgba(255, 255, 255, 0.12); border-radius: 12px; margin-bottom: 16px; padding: 14px; box-shadow: 0 4px 14px rgba(0,0,0,0.3);">
                         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 8px; margin-bottom: 10px;">
                             <div style="display: flex; align-items: center; gap: 10px;">
-                                <span style="font-size: 1.05rem; font-weight: 800; color: #fbbf24;">📦 FİŞ #${o.id} (${o.siparis_kodu || 'SİPARİŞ'})</span>
-                                ${createdTimeStr ? `<span style="font-size: 0.8rem; background: rgba(255,255,255,0.08); color: #cbd5e1; padding: 2px 8px; border-radius: 6px;">⏰ Saat: ${createdTimeStr}</span>` : ''}
+                                <span style="font-size: 1.05rem; font-weight: 800; color: #fbbf24;">📦 FİŞ #${orderId} (${escapeHtml(o.siparis_kodu || 'SİPARİŞ')})</span>
+                                ${createdTimeStr ? `<span style="font-size: 0.8rem; background: rgba(255,255,255,0.08); color: #cbd5e1; padding: 2px 8px; border-radius: 6px;">⏰ Saat: ${escapeHtml(createdTimeStr)}</span>` : ''}
                             </div>
                             <div>
                                 ${isPaid 
@@ -645,7 +654,7 @@ function renderActiveTicketWorkstation() {
                                 <strong style="font-size: 1.15rem; color: #fff; margin-left: 6px;">${batchTotal.toFixed(2)} ₺</strong>
                             </div>
                             ${!isPaid ? `
-                                <button type="button" class="btn-add" style="padding: 7px 16px; font-size: 0.85rem; font-weight: 800; background: linear-gradient(135deg, #10b981, #059669); box-shadow: 0 4px 12px rgba(16,185,129,0.35);" onclick="paySingleSiparisBatch(${o.id}, ${batchTotal})">
+                                <button type="button" class="btn-add" style="padding: 7px 16px; font-size: 0.85rem; font-weight: 800; background: linear-gradient(135deg, #10b981, #059669); box-shadow: 0 4px 12px rgba(16,185,129,0.35);" onclick="paySingleSiparisBatch(${orderId}, ${batchTotal})">
                                     💵 Bu Fiş Paketini Tahsil Et (${batchTotal.toFixed(2)} ₺)
                                 </button>
                             ` : ''}

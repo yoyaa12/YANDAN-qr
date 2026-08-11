@@ -4,7 +4,7 @@ from app.services.kategori_service import KategoriService
 router = APIRouter()
 
 from typing import List
-from app.schemas.schemas import KategoriResponse
+from app.schemas.catalog import KategoriResponse
 
 @router.get("/kategoriler", response_model=List[KategoriResponse])
 async def get_kategoriler(service: KategoriService = Depends()):

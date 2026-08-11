@@ -2,10 +2,9 @@ from fastapi import APIRouter, Depends
 from app.services.urun_service import UrunService
 from app.services.kategori_service import KategoriService
 from app.services.masa_service import MasaService
-from app.schemas.schemas import (
-    UrunEkleModel, UrunGuncelleModel, KategoriEkleModel, MasaEkleModel,
-    AdminIslemResponse
-)
+from app.schemas.catalog import KategoriEkleModel, UrunEkleModel, UrunGuncelleModel
+from app.schemas.common import AdminIslemResponse
+from app.schemas.tables import MasaEkleModel
 
 router = APIRouter()
 

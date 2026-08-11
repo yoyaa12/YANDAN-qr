@@ -2,6 +2,8 @@
 // KITCHEN PANEL (MUTFAK PANELİ) LOGIC (GÜNCELLENMİŞ)
 // ==========================================================================
 
+const escapeHtml = window.SecurityText.escapeHtml;
+
 let kitchenOrders = [];
 
 function playKitchenAlertSound() {
@@ -111,15 +113,17 @@ function renderKitchenOrders() {
 
     let html = '';
     activeOrders.forEach(order => {
+        const orderId = Number(order.id);
+        if (!Number.isInteger(orderId) || orderId <= 0) return;
         const isNew = order.siparis_durumu === 'odendi_mutfakta' || order.siparis_durumu === 'garson_onayladi_mutfakta' || order.siparis_durumu === 'nakit_tahsil_edildi';
         const isPreparing = order.siparis_durumu === 'hazirlaniyor';
 
         html += `
-            <div class="order-card status-${order.siparis_durumu}">
+            <div class="order-card status-${escapeHtml(order.siparis_durumu)}">
                 <div class="order-header">
                     <div>
-                        <div class="order-table-title">🪑 ${order.masa_no}</div>
-                        <div class="order-code">${order.siparis_kodu} • ${order.olusturma_tarihi || ''}</div>
+                        <div class="order-table-title">🪑 ${escapeHtml(order.masa_no)}</div>
+                        <div class="order-code">${escapeHtml(order.siparis_kodu)} • ${escapeHtml(order.olusturma_tarihi)}</div>
                     </div>
                     <div style="text-align: right;">
                         <span class="table-badge" style="background: ${isNew ? 'var(--danger)' : 'var(--accent)'}">
@@ -135,11 +139,11 @@ function renderKitchenOrders() {
             html += `
                 <div class="order-item-row">
                     <div class="order-item-main">
-                        <span style="font-size: 1.1rem;">${item.adet}x ${item.urun_adi}</span>
+                        <span style="font-size: 1.1rem;">${escapeHtml(item.adet)}x ${escapeHtml(item.urun_adi)}</span>
                     </div>
                     ${item.urun_notu ? `
                         <div class="order-item-note">
-                            ⚠️ MÜŞTERİ NOTU: ${item.urun_notu}
+                            ⚠️ MÜŞTERİ NOTU: ${escapeHtml(item.urun_notu)}
                         </div>
                     ` : ''}
                 </div>
@@ -151,13 +155,13 @@ function renderKitchenOrders() {
 
                 <div class="status-btn-group">
                     ${isNew ? `
-                        <button class="btn-status-action btn-warning" onclick="updateOrderStatus(${order.id}, 'hazirlaniyor')">
+                        <button class="btn-status-action btn-warning" onclick="updateOrderStatus(${orderId}, 'hazirlaniyor')">
                             ▶ Hazırlanıyor
                         </button>
                     ` : ''}
                     
                     ${isPreparing ? `
-                        <button class="btn-status-action btn-success" onclick="updateOrderStatus(${order.id}, 'hazir')">
+                        <button class="btn-status-action btn-success" onclick="updateOrderStatus(${orderId}, 'hazir')">
                             ✔ Hazır! (Garsona Bildir)
                         </button>
                     ` : ''}

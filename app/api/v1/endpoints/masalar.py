@@ -2,9 +2,12 @@ from fastapi import APIRouter, Depends
 from typing import List
 from app.services.masa_service import MasaService
 from app.services.siparis_service import SiparisService
-from app.schemas.schemas import (
-    MasaResponse, MoveMasaModel, VerifyQRModel,
-    QRDogrulamaResponse, GenelBasariliResponse
+from app.schemas.common import GenelBasariliResponse
+from app.schemas.tables import (
+    MasaResponse,
+    MoveMasaModel,
+    QRDogrulamaResponse,
+    VerifyQRModel,
 )
 
 router = APIRouter()

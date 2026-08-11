@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from typing import Optional, List
 from app.services.siparis_service import SiparisService
-from app.schemas.schemas import (
+from app.schemas.orders import (
     SiparisOlusturModel, 
     DurumGuncelleModel, 
     SiparisDuzenleModel,

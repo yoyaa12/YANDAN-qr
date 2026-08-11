@@ -1,6 +1,7 @@
 from typing import Optional, List, Dict
 from fastapi import Depends
 from app.database import DatabaseSession, get_db
+from app.enums import OrderStatus, PaymentStatus
 
 class SiparisRepository:
     def __init__(self, db: DatabaseSession = Depends(get_db)):
@@ -49,20 +50,25 @@ class SiparisRepository:
             SELECT TOP 1 s.*, m.masa_no 
             FROM Siparisler s 
             JOIN Masalar m ON s.masa_id = m.id 
-            WHERE s.masa_id = ? AND s.siparis_durumu != 'teslim_edildi' 
+            WHERE s.masa_id = ? AND s.siparis_durumu != ?
             ORDER BY s.id DESC
         """
-        return self.db.execute_query(query, (masa_id,), fetch_one=True)
+        return self.db.execute_query(
+            query, (masa_id, OrderStatus.DELIVERED.value), fetch_one=True
+        )
 
     def get_all_active_by_masa_id(self, masa_id: int):
         query = """
             SELECT s.*, m.masa_no 
             FROM Siparisler s 
             JOIN Masalar m ON s.masa_id = m.id 
-            WHERE s.masa_id = ? AND s.siparis_durumu NOT IN ('iptal', 'odendi_kapatildi')
+            WHERE s.masa_id = ? AND s.siparis_durumu NOT IN (?, ?)
             ORDER BY s.id ASC
         """
-        return self.db.execute_query(query, (masa_id,)) or []
+        return self.db.execute_query(
+            query,
+            (masa_id, OrderStatus.CANCELLED.value, OrderStatus.PAID_CLOSED.value),
+        ) or []
 
     def update_durum(self, siparis_id: int, yeni_durum: str, garson_adi: Optional[str] = None):
         if garson_adi:
@@ -89,18 +95,45 @@ class SiparisRepository:
             )
 
     def get_active_count_for_masa(self, masa_id: int) -> int:
-        query = "SELECT COUNT(*) as cnt FROM Siparisler WHERE masa_id = ? AND siparis_durumu IN ('nakit_bekliyor', 'odendi_mutfakta', 'hazirlaniyor', 'hazir', 'garson_onayi_bekliyor', 'garson_onayladi_mutfakta')"
-        res = self.db.execute_query(query, (masa_id,), fetch_one=True)
+        active_statuses = (
+            OrderStatus.CASH_PENDING.value,
+            OrderStatus.PAID_IN_KITCHEN.value,
+            OrderStatus.PREPARING.value,
+            OrderStatus.READY.value,
+            OrderStatus.WAITER_APPROVAL_PENDING.value,
+            OrderStatus.WAITER_APPROVED_IN_KITCHEN.value,
+        )
+        placeholders = ", ".join("?" for _ in active_statuses)
+        query = f"SELECT COUNT(*) as cnt FROM Siparisler WHERE masa_id = ? AND siparis_durumu IN ({placeholders})"
+        res = self.db.execute_query(query, (masa_id, *active_statuses), fetch_one=True)
         return res['cnt'] if res else 0
 
     def get_unpaid_count_for_masa(self, masa_id: int) -> int:
-        query = "SELECT COUNT(*) as cnt FROM Siparisler WHERE masa_id = ? AND odeme_durumu != 'odendi' AND siparis_durumu NOT IN ('iptal', 'odendi_kapatildi')"
-        res = self.db.execute_query(query, (masa_id,), fetch_one=True)
+        query = "SELECT COUNT(*) as cnt FROM Siparisler WHERE masa_id = ? AND odeme_durumu != ? AND siparis_durumu NOT IN (?, ?)"
+        res = self.db.execute_query(
+            query,
+            (
+                masa_id,
+                PaymentStatus.PAID.value,
+                OrderStatus.CANCELLED.value,
+                OrderStatus.PAID_CLOSED.value,
+            ),
+            fetch_one=True,
+        )
         return res['cnt'] if res else 0
 
     def clear_active_orders_for_masa(self, masa_id: int):
-        query = "UPDATE Siparisler SET siparis_durumu = 'odendi_kapatildi', odeme_durumu = 'odendi' WHERE masa_id = ? AND siparis_durumu NOT IN ('iptal', 'odendi_kapatildi')"
-        self.db.execute_non_query(query, (masa_id,))
+        query = "UPDATE Siparisler SET siparis_durumu = ?, odeme_durumu = ? WHERE masa_id = ? AND siparis_durumu NOT IN (?, ?)"
+        self.db.execute_non_query(
+            query,
+            (
+                OrderStatus.PAID_CLOSED.value,
+                PaymentStatus.PAID.value,
+                masa_id,
+                OrderStatus.CANCELLED.value,
+                OrderStatus.PAID_CLOSED.value,
+            ),
+        )
 
     def update_siparis_items(self, siparis_id: int, toplam_tutar: float, urunler: list, garson_adi: Optional[str] = None):
         if garson_adi:
@@ -117,6 +150,14 @@ class SiparisRepository:
         query = """
             UPDATE Siparisler 
             SET masa_id = ? 
-            WHERE masa_id = ? AND siparis_durumu NOT IN ('iptal', 'odendi_kapatildi')
+            WHERE masa_id = ? AND siparis_durumu NOT IN (?, ?)
         """
-        self.db.execute_non_query(query, (to_masa_id, from_masa_id))
+        self.db.execute_non_query(
+            query,
+            (
+                to_masa_id,
+                from_masa_id,
+                OrderStatus.CANCELLED.value,
+                OrderStatus.PAID_CLOSED.value,
+            ),
+        )

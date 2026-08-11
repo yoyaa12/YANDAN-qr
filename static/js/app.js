@@ -2,6 +2,8 @@
 // CUSTOMER QR MENU & CART & LIVE ORDER TRACKING LOGIC (GÜNCELLENMİŞ)
 // ==========================================================================
 
+const escapeHtml = window.SecurityText.escapeHtml;
+
 let socket = null;
 
 let state = {
@@ -1244,10 +1246,10 @@ function openCartModal() {
             html += `
                 <div class="order-item-row" style="padding: 6px 0; border-bottom: 1px dashed rgba(255,255,255,0.08);">
                     <div class="order-item-main" style="display:flex; justify-content:space-between; align-items:center;">
-                        <div style="font-weight:700; font-size:0.92rem;">${item.urun_adi}</div>
+                        <div style="font-weight:700; font-size:0.92rem;">${escapeHtml(item.urun_adi)}</div>
                         <div style="font-weight:800; color:#fbbf24; font-size:0.95rem;">${item.ara_toplam.toFixed(2)} ₺</div>
                     </div>
-                    ${item.urun_notu ? `<div class="order-item-note" style="margin-top:2px; font-size:0.8rem; padding:2px 6px;">Not: ${item.urun_notu}</div>` : ''}
+                    ${item.urun_notu ? `<div class="order-item-note" style="margin-top:2px; font-size:0.8rem; padding:2px 6px;">Not: ${escapeHtml(item.urun_notu)}</div>` : ''}
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
                         <div style="display:flex; align-items:center; gap:6px;">
                             <button type="button" onclick="window.updateCartItemQuantity(${index}, -1)" style="width:30px; height:30px; font-weight:800; font-size:1.1rem; border-radius:var(--radius-sm); background:rgba(255,255,255,0.12); border:1px solid var(--border-color); color:#fff; cursor:pointer; user-select:none; touch-action:manipulation;">-</button>
@@ -1377,10 +1379,10 @@ function openPaymentCheckout(method) {
     state.cart.forEach(item => {
         summaryHTML += `
             <div style="display:flex; justify-content:space-between;">
-                <span>${item.adet}x ${item.urun_adi}</span>
+                <span>${item.adet}x ${escapeHtml(item.urun_adi)}</span>
                 <span style="font-weight:700;">${item.ara_toplam.toFixed(2)} ₺</span>
             </div>
-            ${item.urun_notu ? `<div style="font-size:0.75rem; color:var(--text-secondary); padding-left:8px;">• ${item.urun_notu}</div>` : ''}
+            ${item.urun_notu ? `<div style="font-size:0.75rem; color:var(--text-secondary); padding-left:8px;">• ${escapeHtml(item.urun_notu)}</div>` : ''}
         `;
     });
     document.getElementById('checkoutSummaryList').innerHTML = summaryHTML;
@@ -1554,7 +1556,10 @@ function formatOrderTime(val) {
 }
 
 let expandedGroupDetailsMap = {};
-window.toggleGroupDetails = function (key) {
+let renderedGroupKeys = [];
+window.toggleGroupDetails = function (groupIndex) {
+    const key = renderedGroupKeys[groupIndex];
+    if (key === undefined) return;
     expandedGroupDetailsMap[key] = !expandedGroupDetailsMap[key];
     renderOrderTrackingUI();
 };
@@ -1683,6 +1688,7 @@ function renderOrderTrackingUI() {
 
     let ordersListHTML = '';
     const groupKeys = Object.keys(groupedItemsMap);
+    renderedGroupKeys = groupKeys;
 
     groupKeys.forEach((key, idx) => {
         const group = groupedItemsMap[key];
@@ -1694,7 +1700,7 @@ function renderOrderTrackingUI() {
             const subPriceStr = (sub.tutar % 1 === 0) ? sub.tutar.toFixed(0) : sub.tutar.toFixed(2);
             sublinesHTML += `
                 <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.78rem; padding: 3px 0; color:#cbd5e1; border-bottom: 1px dashed rgba(255,255,255,0.06);">
-                    <span>Sipariş ${sub.orderIndex} ${sub.orderTime ? `• ${sub.orderTime}` : ''} (${sub.adet}x)</span>
+                    <span>Sipariş ${sub.orderIndex} ${sub.orderTime ? `• ${escapeHtml(sub.orderTime)}` : ''} (${sub.adet}x)</span>
                     <span style="white-space:nowrap;">${sub.isPaid ? '<span style="color:#10b981; font-weight:700;">🟢 Ödendi</span>' : '<span style="color:#f59e0b; font-weight:700;">🟡 Kasada Ödenecek</span>'} • ${subPriceStr} ₺</span>
                 </div>
             `;
@@ -1704,18 +1710,18 @@ function renderOrderTrackingUI() {
             <div style="padding: 8px 0; ${idx > 0 ? 'border-top: 1px dashed rgba(255,255,255,0.1);' : ''}">
                 <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
                     <div style="min-width: 0; flex-shrink: 1;">
-                        <span style="font-weight: 800; font-size: 0.95rem; color: #fff;">${group.total_adet}x ${group.urun_adi}</span>
-                        ${group.urun_notu ? `<div style="font-size:0.75rem; color:#94a3b8;">Not: ${group.urun_notu}</div>` : ''}
+                        <span style="font-weight: 800; font-size: 0.95rem; color: #fff;">${group.total_adet}x ${escapeHtml(group.urun_adi)}</span>
+                        ${group.urun_notu ? `<div style="font-size:0.75rem; color:#94a3b8;">Not: ${escapeHtml(group.urun_notu)}</div>` : ''}
                     </div>
                     <div style="display:flex; align-items:center; gap: 8px; flex-shrink: 0;">
                         <span style="font-weight: 800; font-size: 0.95rem; color: #fbbf24; white-space: nowrap; flex-shrink: 0;">${groupPriceStr} ₺</span>
-                        <button type="button" onclick="toggleGroupDetails('${key}')" style="background: rgba(99,102,241,0.15); border: 1px solid rgba(99,102,241,0.4); color: #a5b4fc; border-radius: 6px; padding: 4px 8px; font-size: 0.75rem; font-weight: 700; cursor: pointer; white-space: nowrap; flex-shrink: 0; user-select: none; touch-action: manipulation;">
+                        <button type="button" onclick="toggleGroupDetails(${idx})" style="background: rgba(99,102,241,0.15); border: 1px solid rgba(99,102,241,0.4); color: #a5b4fc; border-radius: 6px; padding: 4px 8px; font-size: 0.75rem; font-weight: 700; cursor: pointer; white-space: nowrap; flex-shrink: 0; user-select: none; touch-action: manipulation;">
                             ${isExpanded ? '▲ Gizle' : 'Ayrıntılar'}
                         </button>
                     </div>
                 </div>
 
-                <div id="groupDetails_${key}" style="display: ${isExpanded ? 'block' : 'none'}; margin-top: 6px; background: rgba(0,0,0,0.3); border-radius: 8px; padding: 6px 10px;">
+                <div id="groupDetails_${idx}" style="display: ${isExpanded ? 'block' : 'none'}; margin-top: 6px; background: rgba(0,0,0,0.3); border-radius: 8px; padding: 6px 10px;">
                     ${sublinesHTML}
                 </div>
             </div>

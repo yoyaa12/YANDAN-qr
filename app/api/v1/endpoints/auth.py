@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 from app.services.auth_service import AuthService
-from app.schemas.schemas import LoginModel, LoginResponse
+from app.schemas.auth import LoginModel, LoginResponse
 
 router = APIRouter()
 

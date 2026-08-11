@@ -42,7 +42,7 @@ check_git_leaks.py
 move_tools.py
 git_leak_report.txt
 
-# Documentation
-docs/
+# Project memory under docs/ is intentionally tracked.  These files are the
+# repository-wide source of truth for the security refactor and its progress.
 
 
