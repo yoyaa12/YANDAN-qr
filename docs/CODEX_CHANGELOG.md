@@ -671,3 +671,84 @@ User approved the staff credential migration. Provisioned a strong `AUTH_SECRET_
 #### Next action
 
 - The user executes `scripts/migrate_credentials.py`. Afterwards, begin work on Milestone 3: Role-based authorization.
+
+---
+
+### 2026-08-11 16:40:00 +03:00 - Milestone 4: QR Customer Session Authentication (Backend)
+
+#### Summary
+
+Implemented the backend requirements for QR Customer Session Authentication to secure customer orders. A database script was prepared for the `CustomerSessions` table. The `auth_repo` and `auth_service` were updated to handle session generation, hashing, and database storage. The `/api/masalar/{id}/verify-qr` endpoint was updated to issue session tokens upon success. The `/api/siparisler` endpoint now enforces the BOS -> DOLU logic, requiring a physical QR scan (`current_totp_token`) for empty tables, and a valid `CUSTOMER_SESSION` token for subsequent orders.
+
+#### Files created
+
+- `scripts/create_sessions_table.py`
+  - Database script to create the `CustomerSessions` table.
+
+#### Files modified
+
+- `app/repositories/auth_repo.py`
+  - Added methods for creating, retrieving, and revoking customer sessions.
+- `app/services/auth_service.py`
+  - Implemented token generation, hashing, validation, and database orchestration.
+- `app/api/v1/dependencies.py`
+  - Created `require_customer_session` dependency for route authorization.
+- `app/api/v1/endpoints/masalar.py`
+  - Modified `verify-qr` to generate and return a session token upon successful TOTP validation.
+- `app/api/v1/endpoints/siparisler.py`
+  - Enforced `CUSTOMER_SESSION` or `current_totp_token` requirement during order creation.
+- `docs/IMPLEMENTATION_STATUS.md`
+  - Updated Milestone 4 status.
+- `docs/CODEX_CHANGELOG.md`
+  - Appended this entry.
+
+#### Files deleted
+
+- None.
+
+#### Database / migrations
+
+- Prepared `scripts/create_sessions_table.py` (awaiting manual execution).
+
+#### API changes
+
+- `/api/masalar/{masa_id}/verify-qr` now returns `{ "valid": true, "session_token": "<token>" }`.
+- `/api/siparisler` POST endpoint now requires `Authorization: Bearer <session_token>` for DOLU tables or `current_totp_token` in the payload for BOS tables.
+
+#### Authentication / authorization changes
+
+- Customer operations (orders) are now gated behind a `CUSTOMER_SESSION` JWT-style bearer token (hashed in DB).
+
+#### Tests added or modified
+
+- Manual tests to be performed via UI after frontend is complete.
+
+#### Tests executed
+
+- None yet (pending frontend completion).
+
+#### Test results
+
+- N/A.
+
+#### Verification performed
+
+- Code review of token handling and BOS -> DOLU rule enforcement.
+
+#### Security impact
+
+- Replaces anonymous order submission with session-backed authorization, preventing remote attackers from appending orders to DOLU tables without scanning the physical QR code first.
+
+#### Architectural decisions
+
+- `CUSTOMER_SESSION` tokens are random 64-character hex strings, hashed using SHA-256 before database insertion. They are bound to a specific `masa_id` and `device_id`.
+- The token is transmitted as a Bearer token in the `Authorization` header.
+
+#### Known issues / unfinished work
+
+- Frontend `app.js` is not yet sending the session token.
+
+#### Next action
+
+- User to revert `app.js`, run `scripts/create_sessions_table.py`, and commit changes. Then, apply frontend `app.js` fixes to complete Milestone 4.
+

@@ -30,3 +30,5 @@ class QRDogrulamaResponse(BaseModel):
     valid: bool
     message: str
     masa_id: Optional[int] = None
+    session_token: Optional[str] = None
+

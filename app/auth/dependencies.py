@@ -90,3 +90,38 @@ def require_roles(*allowed_roles: UserRole) -> Callable[..., StaffPrincipal]:
         return principal
 
     return role_guard
+
+customer_bearer = HTTPBearer(
+    auto_error=False,
+    bearerFormat="Hex",
+    description="Müşteri QR oturum token'ı",
+    scheme_name="CustomerBearer",
+)
+
+def get_current_customer(
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None,
+        Security(customer_bearer),
+    ],
+    repo: Annotated[AuthRepository, Depends()],
+) -> dict:
+    from app.services.auth_service import AuthService
+    
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Geçerli müşteri oturum token'ı gerekli.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+        
+    service = AuthService(repo)
+    session = service.verify_customer_session(credentials.credentials)
+    
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Müşteri oturumu geçersiz veya süresi dolmuş. Lütfen QR kodu tekrar okutun.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+        
+    return session

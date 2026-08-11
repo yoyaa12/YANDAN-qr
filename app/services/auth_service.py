@@ -168,3 +168,30 @@ class AuthService:
         
         self.repo.ban_device(device_id)
         return {"status": "success", "message": "Cihaz başarıyla yasaklandı."}
+
+    def create_customer_session(self, masa_id: int, device_id: str = None) -> str:
+        import secrets
+        from datetime import datetime, timedelta
+        
+        # Generate a random 64-character hex token
+        raw_token = secrets.token_hex(32)
+        # Hash it with SHA-256 for database storage
+        token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+        
+        # 90 minutes expiration
+        expires_at = datetime.now() + timedelta(minutes=90)
+        
+        self.repo.create_customer_session(token_hash, masa_id, expires_at, device_id)
+        return raw_token
+
+    def verify_customer_session(self, raw_token: str) -> dict:
+        if not raw_token:
+            return None
+            
+        token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+        session = self.repo.get_active_customer_session(token_hash)
+        
+        if not session:
+            return None
+            
+        return session

@@ -40,3 +40,22 @@ class AuthRepository:
 
     def ban_device(self, device_id: str):
         self.db.execute_non_query("INSERT INTO BannedDevices (device_id) VALUES (?)", (device_id,))
+
+    def create_customer_session(self, session_token_hash: str, masa_id: int, expires_at, device_id: str = None):
+        query = """
+            INSERT INTO CustomerSessions (session_token_hash, masa_id, device_id, expires_at, is_active)
+            VALUES (?, ?, ?, ?, 1)
+        """
+        self.db.execute_non_query(query, (session_token_hash, masa_id, device_id, expires_at))
+
+    def get_active_customer_session(self, session_token_hash: str):
+        query = """
+            SELECT id, masa_id, device_id, expires_at
+            FROM CustomerSessions
+            WHERE session_token_hash = ? AND is_active = 1 AND expires_at > GETDATE()
+        """
+        return self.db.execute_query(query, (session_token_hash,), fetch_one=True)
+
+    def revoke_customer_session(self, session_token_hash: str):
+        query = "UPDATE CustomerSessions SET is_active = 0 WHERE session_token_hash = ?"
+        self.db.execute_non_query(query, (session_token_hash,))
