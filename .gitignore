@@ -35,7 +35,13 @@ scratch/
 Thumbs.db
 
 #
-scripts/
+# Keep approved, secret-free migration tooling reviewable. Any other files in
+# scripts/ remain ignored so credential delivery material cannot be tracked.
+scripts/*
+!scripts/generate_staff_pin_delivery.py
+!scripts/migrate_staff_credentials.py
+!scripts/staff_migration_db.py
+!scripts/update_staff_credential.sql
 *.txt
 temp_*.py
 check_git_leaks.py

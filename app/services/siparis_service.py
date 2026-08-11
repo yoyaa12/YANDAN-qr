@@ -5,6 +5,7 @@ from typing import Optional, List
 
 from app.core.events import event_bus
 from app.core.socket_manager import clear_browsing_table
+from app.auth.models import StaffPrincipal
 from app.enums import OrderAction, OrderStatus, PaymentMethod, PaymentStatus, TableStatus
 from app.repositories.siparis_repo import SiparisRepository
 from app.repositories.masa_repo import MasaRepository
@@ -12,6 +13,7 @@ from app.repositories.urun_repo import UrunRepository
 from app.repositories.auth_repo import AuthRepository
 from app.schemas.orders import DurumGuncelleModel, SiparisDuzenleModel, SiparisOlusturModel
 from app.schemas.orders import SiparisDurumResponse, SiparisResponse
+from app.services.order_authorization import enforce_order_status_role
 from app.database import db_transaction
 
 def sanitize_for_json(data):
@@ -214,7 +216,13 @@ class SiparisService:
             res["redirect_masa_no"] = t_table.get("masa_no", f"Masa {target_masa_id}") if t_table else f"Masa {target_masa_id}"
         return res
 
-    async def update_siparis_durumu(self, siparis_id: int, data: DurumGuncelleModel) -> SiparisDurumResponse:
+    async def update_siparis_durumu(
+        self,
+        siparis_id: int,
+        data: DurumGuncelleModel,
+        principal: StaffPrincipal,
+    ) -> SiparisDurumResponse:
+        enforce_order_status_role(principal.role, data.yeni_durum)
         yeni_durum = data.yeni_durum.value
         garson_adi = data.garson_adi or "Garson Berat"
         masa_bosaldi = False

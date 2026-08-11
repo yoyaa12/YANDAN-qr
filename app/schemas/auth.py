@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -33,8 +33,14 @@ class GarsonResponse(BaseModel):
 class LoginResponse(BaseModel):
     status: str
     user: KullaniciResponse
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+    expires_in: int = Field(ge=60, le=3600)
 
 
 class GarsonPinResponse(BaseModel):
     status: str
     garson: KullaniciResponse
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+    expires_in: int = Field(ge=60, le=3600)

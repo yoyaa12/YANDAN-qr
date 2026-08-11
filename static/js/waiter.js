@@ -13,6 +13,30 @@ let pendingActionCallback = null;
 let activeBrowsingTables = {}; // { masa_id: { masa_no: 'Masa 1', time: Date.now() } }
 let activeDetailMasaId = null;
 
+window.addEventListener('staff-authenticated', event => {
+    const user = event.detail && event.detail.user;
+    if (user && user.rol === 'garson') {
+        activeGarson = {
+            id: user.id,
+            garson_adi: user.garson_adi || user.kullanici_adi,
+            rol: user.rol
+        };
+        updateActiveGarsonBadge();
+        closeGarsonPinModal();
+    }
+});
+
+window.addEventListener('staff-auth-required', () => {
+    activeGarson = null;
+    updateActiveGarsonBadge();
+    openGarsonPinModal();
+});
+
+window.addEventListener('staff-auth-cleared', () => {
+    activeGarson = null;
+    updateActiveGarsonBadge();
+});
+
 function toPositiveInteger(value) {
     const parsed = Number(value);
     return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
@@ -162,30 +186,23 @@ document.addEventListener('DOMContentLoaded', () => {
 // 6 HANELİ GARSON PIN YÖNETİMİ & NUMPAD LOGIC (HER İŞLEMDE PIN SORULUR)
 // -------------------------------------------------------------
 function touchGarsonActivity() {
-    if (activeGarson) {
-        try {
-            localStorage.setItem('activeGarsonSession', JSON.stringify({
-                garson: activeGarson,
-                lastActivity: Date.now()
-            }));
-        } catch (e) { }
-    }
+    // Signed token expiration is authoritative. Browser activity must not
+    // extend or manufacture authentication state.
 }
 
 function restoreGarsonSession() {
-    try {
-        const stored = localStorage.getItem('activeGarsonSession');
-        if (stored) {
-            const data = JSON.parse(stored);
-            const ONE_HOUR = 60 * 60 * 1000;
-            if (data && data.garson && data.lastActivity && (Date.now() - data.lastActivity < ONE_HOUR)) {
-                activeGarson = data.garson;
-                touchGarsonActivity();
-                updateActiveGarsonBadge();
-                return true;
-            }
-        }
-    } catch (e) { }
+    const session = window.StaffAuth && window.StaffAuth.getSession();
+    if (session && session.user && session.user.rol === 'garson') {
+        activeGarson = {
+            id: session.user.id,
+            garson_adi: session.user.garson_adi || session.user.kullanici_adi,
+            rol: session.user.rol
+        };
+        updateActiveGarsonBadge();
+        return true;
+    }
+    // Clean up the obsolete browser-trusted identity from older builds. It is
+    // never read as proof of authentication.
     localStorage.removeItem('activeGarsonSession');
     activeGarson = null;
     updateActiveGarsonBadge();
@@ -264,17 +281,18 @@ async function submitGarsonPin() {
 
         const data = await res.json();
 
-        if (res.ok && data.status === 'success') {
+        if (res.ok && data.status === 'success' && data.access_token) {
             for (let i = 1; i <= 6; i++) {
                 const slot = document.getElementById(`pinSlot${i}`);
                 if (slot) slot.classList.add('success');
             }
 
             const person = data.garson; // { garson_adi: 'Yiğit' / 'Berat' / 'Ahmet', rol: 'garson' / 'admin' }
+            const actionToExecute = pendingActionCallback;
+            window.StaffAuth.setSessionFromLogin(data, person);
             activeGarson = person;
             touchGarsonActivity();
             updateActiveGarsonBadge();
-            const actionToExecute = pendingActionCallback;
 
             setTimeout(() => {
                 closeGarsonPinModal();
@@ -1039,9 +1057,11 @@ function updateActiveGarsonBadge() {
 }
 
 window.logoutGarson = function () {
+    if (window.StaffAuth) window.StaffAuth.clearSession({ notify: false });
     localStorage.removeItem('activeGarsonSession');
     activeGarson = null;
     updateActiveGarsonBadge();
     showWaiterToast("Garson oturumu kapatıldı.");
+    openGarsonPinModal();
 };
 

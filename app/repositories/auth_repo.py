@@ -6,13 +6,30 @@ class AuthRepository:
     def __init__(self, db: DatabaseSession = Depends(get_db)):
         self.db = db
 
-    def get_user_by_credentials(self, kullanici_adi: str, sifre_hash: str):
-        query = "SELECT id, kullanici_adi, rol FROM Kullanicilar WHERE kullanici_adi = ? AND sifre_hash = ?"
-        return self.db.execute_query(query, (kullanici_adi, sifre_hash), fetch_one=True)
+    def get_user_by_username(self, kullanici_adi: str):
+        query = """
+            SELECT id, kullanici_adi, rol, sifre_hash
+            FROM Kullanicilar
+            WHERE kullanici_adi = ?
+        """
+        return self.db.execute_query(query, (kullanici_adi,), fetch_one=True)
+
+    def get_staff_by_id(self, user_id: int):
+        query = """
+            SELECT id, kullanici_adi, rol
+            FROM Kullanicilar
+            WHERE id = ?
+        """
+        return self.db.execute_query(query, (user_id,), fetch_one=True)
     
-    def get_garson_by_pin(self, pin_code: str):
-        query = "SELECT id, kullanici_adi AS garson_adi, rol FROM Kullanicilar WHERE sifre_hash = ?"
-        return self.db.execute_query(query, (pin_code,), fetch_one=True)
+    def get_garson_credentials(self):
+        query = """
+            SELECT id, kullanici_adi AS garson_adi, rol, sifre_hash
+            FROM Kullanicilar
+            WHERE rol = ?
+            ORDER BY id ASC
+        """
+        return self.db.execute_query(query, (UserRole.WAITER.value,)) or []
 
     def get_all_garsonlar(self):
         query = "SELECT id, kullanici_adi AS garson_adi FROM Kullanicilar WHERE rol = ? ORDER BY kullanici_adi ASC"

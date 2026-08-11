@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends
 from typing import List
+from app.auth.dependencies import require_roles
+from app.enums import UserRole
 from app.services.masa_service import MasaService
 from app.services.siparis_service import SiparisService
 from app.schemas.common import GenelBasariliResponse
@@ -12,6 +14,9 @@ from app.schemas.tables import (
 
 router = APIRouter()
 
+table_operator = require_roles(UserRole.ADMIN, UserRole.WAITER, UserRole.CASHIER)
+qr_display_operator = require_roles(UserRole.ADMIN, UserRole.CASHIER)
+
 @router.get("/masalar", response_model=List[MasaResponse])
 async def get_masalar(service: MasaService = Depends()):
     return service.get_masalar_with_browsing()
@@ -20,22 +25,36 @@ async def get_masalar(service: MasaService = Depends()):
 async def get_masa_aktif_siparis(masa_id: int, siparis_service: SiparisService = Depends()):
     return siparis_service.get_masa_aktif_siparis(masa_id)
 
-@router.post("/masalar/move", response_model=GenelBasariliResponse)
+@router.post(
+    "/masalar/move",
+    response_model=GenelBasariliResponse,
+    dependencies=[Depends(table_operator)],
+)
 async def move_masa(data: MoveMasaModel, siparis_service: SiparisService = Depends()):
     await siparis_service.move_masa(data.from_masa_id, data.to_masa_id)
     return GenelBasariliResponse(status="success", message="Masa adisyonu başarıyla taşındı.")
 
-@router.post("/masalar/{masa_id}/clear", response_model=GenelBasariliResponse)
+@router.post(
+    "/masalar/{masa_id}/clear",
+    response_model=GenelBasariliResponse,
+    dependencies=[Depends(table_operator)],
+)
 async def clear_masa(masa_id: int, siparis_service: SiparisService = Depends()):
     await siparis_service.clear_masa(masa_id)
     return GenelBasariliResponse(status="success", message="Masa oturumu sonlandırıldı.")
 
-@router.get("/masalar/all-dynamic-qrs")
+@router.get(
+    "/masalar/all-dynamic-qrs",
+    dependencies=[Depends(qr_display_operator)],
+)
 async def get_all_dynamic_qrs(masa_service: MasaService = Depends()):
     """Tüm masaların canlı 30 saniyelik Dinamik QR verilerini döner."""
     return masa_service.get_all_dynamic_qrs()
 
-@router.get("/masalar/{masa_id}/dynamic-qr")
+@router.get(
+    "/masalar/{masa_id}/dynamic-qr",
+    dependencies=[Depends(qr_display_operator)],
+)
 async def get_dynamic_qr(masa_id: int, masa_service: MasaService = Depends()):
     """Masadaki dijital ekran veya Kasa simülatörü için canlı Dinamik QR bilgisini döner."""
     return masa_service.get_dynamic_qr_info(masa_id)

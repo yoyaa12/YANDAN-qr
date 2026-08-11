@@ -88,7 +88,7 @@ def verify_dynamic_token(masa_id: int, secret: str, token: str, timestamp: float
     for w in windows_to_check:
         token_entry = f"{masa_id}:{token}:{w}"
         if token_entry in _used_tokens:
-            print(f"[SECURITY GUARD] Replay attack detected for Table {masa_id} with token {token} in window {w}")
+            print(f"[SECURITY GUARD] Replay attack detected for Table {masa_id} in window {w}")
             continue
 
         ts = w * 30

@@ -27,6 +27,25 @@ class RecordingDatabase:
 
 
 class RepositoryEnumQueryTests(unittest.TestCase):
+    def test_staff_login_loads_hash_by_username_for_application_verification(self):
+        db = RecordingDatabase(query_result=None)
+        AuthRepository(db=db).get_user_by_username("Test User")
+
+        recorded = db.queries[0]
+        normalized_sql = " ".join(recorded["query"].split()).lower()
+        self.assertEqual(recorded["params"], ("Test User",))
+        self.assertIn("sifre_hash", normalized_sql)
+        self.assertIn("where kullanici_adi = ?", normalized_sql)
+        self.assertNotIn("and sifre_hash = ?", normalized_sql)
+
+    def test_waiter_pin_login_loads_only_verified_waiter_role_candidates(self):
+        db = RecordingDatabase(query_result=[])
+        AuthRepository(db=db).get_garson_credentials()
+
+        recorded = db.queries[0]
+        self.assertEqual(recorded["params"], (UserRole.WAITER.value,))
+        self.assertIn("sifre_hash", recorded["query"])
+
     def test_waiter_filter_uses_verified_role_parameter(self):
         db = RecordingDatabase(query_result=[])
         AuthRepository(db=db).get_all_garsonlar()
