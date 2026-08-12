@@ -529,7 +529,7 @@ Status: NOT STARTED
 
 ### Milestone 4 - QR customer session authentication
 
-Status: PARTIALLY COMPLETED (Backend done, Frontend pending)
+Status: COMPLETED
 
 - [x] Design a database-backed `CustomerSessions` table with hashed session tokens,
   expiration, revocation, and table binding. (Schema script created)
@@ -537,7 +537,7 @@ Status: PARTIALLY COMPLETED (Backend done, Frontend pending)
 - [x] Update `verify-qr` endpoint to return a secure session token upon success.
 - [x] Create a `require_customer_session` dependency to enforce token validation.
 - [x] Update `/api/siparisler` POST endpoint to require either a valid `CUSTOMER_SESSION` or a `current_totp_token` (for BOS -> DOLU).
-- [ ] Update frontend `app.js` to store the received session token and send it in the Authorization header.
+- [x] Update frontend `app.js` to store the received session token and send it in the Authorization header.
 
 ### Milestone 5 - Table/order object-level authorization
 
