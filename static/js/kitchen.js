@@ -37,11 +37,22 @@ function playKitchenAlertSound() {
     } catch(e) {}
 }
 
+function getStaffToken() {
+    if (window.StaffAuth && window.StaffAuth.getSession()) {
+        return window.StaffAuth.getSession().accessToken;
+    }
+    try {
+        const stored = JSON.parse(sessionStorage.getItem('qrStaffAuthSessionV1') || 'null');
+        return stored ? stored.accessToken : null;
+    } catch (e) { return null; }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     loadKitchenOrders();
 
     // Socket.io Canlı Bağlantı & Gerçek Bağlantı Kontrolü
     const socket = io({
+        auth: { token: getStaffToken() },
         reconnection: true,
         reconnectionAttempts: Infinity,
         reconnectionDelay: 1000,

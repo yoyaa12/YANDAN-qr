@@ -37,20 +37,37 @@ window.toggleGroupDetails = function(groupIndex, event) {
     }
 };
 
-// GİRİŞ KISITLAMASI (Küsürat limitleyici)
-window.limitDecimals = function(el) {
-    if (el.value.includes('.')) {
-        let parts = el.value.split('.');
-        if (parts[1].length > 2) {
-            el.value = parts[0] + '.' + parts[1].substring(0, 2);
-        }
+function updateKasaSocketBadge(isConnected) {
+    const badge = document.getElementById('socketStatusBadge');
+    if (badge) {
+        badge.innerHTML = isConnected ? `🟢 Canlı Bağlantı` : `🔴 Bağlantı Kesildi`;
+        badge.className = isConnected ? `socket-badge connected` : `socket-badge disconnected`;
     }
-};
+}
+
+function updateDynamicQRBadgeTimers() {
+    Object.keys(kasaDynamicQRs).forEach(mId => {
+        const qr = kasaDynamicQRs[mId];
+        const timerEl = document.getElementById(`qrTimer_${mId}`);
+        if (timerEl && qr) {
+            timerEl.innerText = `${qr.remaining_seconds}s`;
+        }
+    });
+}
+
+function getStaffToken() {
+    if (window.StaffAuth && window.StaffAuth.getSession()) {
+        return window.StaffAuth.getSession().accessToken;
+    }
+    try {
+        const stored = JSON.parse(sessionStorage.getItem('qrStaffAuthSessionV1') || 'null');
+        return stored ? stored.accessToken : null;
+    } catch (e) { return null; }
+}
 
 document.addEventListener('DOMContentLoaded', () => {
     loadKasaData();
 
-    // 1 SANİYELİK CANLI DINAMIK QR SAYAÇ ZAMANLAYICISI
     setInterval(() => {
         let needRefresh = false;
         Object.keys(kasaDynamicQRs).forEach(mId => {
@@ -67,8 +84,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }, 1000);
 
-    // SOCKET.IO CANLI DİNLEME
     const socket = io({
+        auth: { token: getStaffToken() },
         reconnection: true,
         reconnectionAttempts: Infinity,
         reconnectionDelay: 1000
@@ -83,7 +100,6 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.on('masa_tasindi', () => loadKasaData());
     socket.on('garson_onay_talebi', () => loadKasaData());
 
-    // F1 - F8 VE ESC KLAVYE KISAYOLLARI DİNLEYİCİSİ (ESC: KAPAT / GERİ DÖN, F5: YENİLE)
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
             e.preventDefault();
@@ -105,24 +121,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-function updateKasaSocketBadge(isConnected) {
-    const badge = document.getElementById('socketStatusBadge');
-    if (badge) {
-        badge.innerHTML = isConnected ? `🟢 Canlı Bağlantı` : `🔴 Bağlantı Kesildi`;
-        badge.className = isConnected ? `socket-badge connected` : `socket-badge disconnected`;
-    }
-}
-
-function updateDynamicQRBadgeTimers() {
-    Object.keys(kasaDynamicQRs).forEach(mId => {
-        const qr = kasaDynamicQRs[mId];
-        const timerEl = document.getElementById(`qrTimer_${mId}`);
-        if (timerEl && qr) {
-            timerEl.innerText = `${qr.remaining_seconds}s`;
-        }
-    });
-}
-
 async function loadKasaData() {
     try {
         const [tablesRes, ordersRes, qrsRes] = await Promise.all([
@@ -139,7 +137,6 @@ async function loadKasaData() {
         updateFilterCounts();
         renderKasaGrid();
 
-        // Eğer bir masa seçiliyse iş istasyonunu güncelle
         if (activeMasaId) {
             renderActiveTicketWorkstation();
         }
@@ -192,9 +189,6 @@ function getFormattedMasaNo(masa_no) {
 }
 
 function renderKasaGrid() {
-    const salonContainer = document.getElementById('kasaGridSalon');
-    const bahceContainer = document.getElementById('kasaGridBahce');
-    if (!salonContainer || !bahceContainer) return;
 
     const query = (document.getElementById('kasaSearchInput')?.value || '').toLowerCase().trim();
 

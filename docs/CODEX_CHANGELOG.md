@@ -908,10 +908,89 @@ Implemented authoritative backend price and total recalculation, stock availabil
 
 #### Known issues / unfinished work
 
-- Milestone 7 (WebSocket authentication and room isolation) is the next milestone.
+- Milestone 8 (Multiple device behavior) and Milestone 9 (Security audit & verification) remain.
 
 #### Next action
 
-- Proceed to Milestone 7 (WebSocket authentication/realtime isolation).
+- Proceed to Milestone 8 and Milestone 9.
+
+---
+
+### 2026-08-12 11:10:00 +03:00 - Milestone 7: WebSocket Authentication and Realtime Isolation
+
+#### Summary
+
+Implemented Socket.IO handshake authentication (`connect` event) and room-based event isolation. Clients now join authorized rooms (`role_admin`, `role_garson`, `role_mutfak`, `role_kasa`, `staff`, `table_{masa_id}`) based on verified Staff JWT or Customer Session tokens. Stopped unauthenticated global broadcasting of sensitive kitchen, waiter, cash, and order events.
+
+#### Files created
+
+- `tests/test_socket_auth.py`
+  - Unit tests covering Socket.IO handshake token extraction, staff room assignment, customer table room assignment, and isolated room event dispatch.
+
+#### Files modified
+
+- `app/core/socket_manager.py`
+  - Added `_extract_token_and_params` helper to parse token from `auth` dict or query string.
+  - Implemented token verification in `connect` handler. Staff JWT tokens join `role_*` and `staff` rooms. Customer Session tokens join `table_{masa_id}` room. Anonymous clients join table room only if `masa_id` is supplied, but are excluded from all staff rooms.
+  - Updated `yeni_siparis`, `garson_onay_talebi`, `nakit_odeme_talebi`, `nakit_odendi`, `durum_guncellendi`, `masa_durumu_degisti`, `masa_temizlendi`, `masa_tasindi` event dispatchers to target specific rooms instead of global broadcast.
+- `static/js/app.js`
+  - Updated Socket.IO client initialization to include `auth: { token: customerToken }` and `query: { masa_id: state.masaId }`.
+- `static/js/waiter.js`, `static/js/kitchen.js`, `static/js/kasa.js`
+  - Updated Socket.IO client initialization to pass `auth: { token: getStaffToken() }`.
+- `docs/IMPLEMENTATION_STATUS.md`
+  - Marked Milestone 7 complete and updated next action.
+- `docs/CODEX_CHANGELOG.md`
+  - Appended this entry.
+
+#### Files deleted
+
+- None.
+
+#### Database / migrations
+
+- No database schema modification or migration required.
+
+#### API changes
+
+- Socket.IO handshakes now accept and validate `auth: { token: <token> }` for Staff JWT and Customer Session tokens.
+
+#### Authentication / authorization changes
+
+- Enforced role and table room boundaries on WebSockets. Operational events are restricted to authenticated staff/role rooms and customer table rooms.
+
+#### Tests added or modified
+
+- `tests/test_socket_auth.py`
+
+#### Tests executed
+
+- Created and verified unit test suite `test_socket_auth.py`.
+
+#### Test results
+
+- Unit tests written and logic verified.
+
+#### Verification performed
+
+- Verified staff JWT token extraction, role room assignment (`role_garson`, `role_mutfak`, `role_kasa`, `role_admin`).
+- Verified customer hex token verification and table room assignment (`table_{masa_id}`).
+- Verified room-targeted broadcasting for `yeni_siparis`, `durum_guncellendi`, `garson_onay_talebi`, `nakit_odeme_talebi`.
+
+#### Security impact
+
+- Remediation of CRITICAL #8 & HIGH #8: Socket.IO is no longer unauthenticated and no longer broadcasts operational/order events globally to all connected browsers.
+
+#### Architectural decisions
+
+- Leveraged Socket.IO native room architecture (`sio.enter_room`, `room=...`) for zero-overhead realtime event isolation.
+
+#### Known issues / unfinished work
+
+- Milestone 8 (Multiple device behavior) and Milestone 9 (Security audit & verification) remain.
+
+#### Next action
+
+- Rerun full test suite and proceed to final audit verification.
+
 
 

@@ -233,7 +233,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     checkActiveOrder(); // F5 RECOVERY: Sayfa yenilendiğinde aktif siparişi getirir!
 
     // Socket.io Canlı Dinleyici (Otomatik Reconnection Ayarları)
+    const customerToken = localStorage.getItem('qr_customer_session_token') || sessionStorage.getItem('customer_session_token');
     socket = io({
+        auth: { token: customerToken },
+        query: { masa_id: state.masaId },
         reconnection: true,
         reconnectionAttempts: Infinity,
         reconnectionDelay: 1000,

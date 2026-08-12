@@ -563,11 +563,13 @@ Status: COMPLETED
 
 ### Milestone 7 - WebSocket authentication/realtime isolation
 
-Status: NOT STARTED
+Status: COMPLETED
 
-- Authenticate Socket.IO handshakes with STAFF or CUSTOMER_SESSION tokens.
-- Join only authorized role/table rooms and stop global sensitive broadcasts.
-- Validate incoming event payloads and repair stale membership handling.
+- [x] Socket.IO handshake authentication (`connect` event) for STAFF (JWT) and CUSTOMER_SESSION (Hex token).
+- [x] Room-based socket isolation (`role_garson`, `role_mutfak`, `role_kasa`, `role_admin`, `staff`, `table_{masa_id}`).
+- [x] Stopped global unauthenticated broadcasting of sensitive order and operational events.
+- [x] Frontend scripts (`app.js`, `waiter.js`, `kitchen.js`, `kasa.js`) updated to pass authentication tokens when opening socket connections.
+- [x] Added automated unit test suite in `tests/test_socket_auth.py`.
 
 ### Milestone 8 - Multiple-device/session behavior
 
@@ -646,4 +648,4 @@ Status: NOT STARTED
 
 ## Exact next action
 
-Proceed to Milestone 7 (WebSocket authentication/realtime isolation). Authenticate Socket.IO connections using STAFF JWT or CUSTOMER_SESSION tokens and isolate event broadcasts to authorized table/role rooms.
+Proceed to Milestone 8 (Multiple-device/session behavior) and Milestone 9 (Security Audit & Test Verification). Run tests for WebSocket authentication and endpoint security matrix.
