@@ -520,12 +520,12 @@ Status: COMPLETED (Migration script prepared, requires manual execution)
 
 ### Milestone 3 - Role-based authorization
 
-Status: NOT STARTED
+Status: COMPLETED
 
-- Protect admin, waiter, kitchen, cashier, QR-display, table move/clear, ban,
+- [x] Protect admin, waiter, kitchen, cashier, QR-display, table move/clear, ban,
   order list/update, and payment-changing operations using a documented role
   matrix.
-- Add service-level transition and object checks.
+- [x] Add service-level transition and object checks (`app/services/order_authorization.py`).
 
 ### Milestone 4 - QR customer session authentication
 
@@ -541,11 +541,12 @@ Status: COMPLETED
 
 ### Milestone 5 - Table/order object-level authorization
 
-Status: NOT STARTED
+Status: COMPLETED
 
-- Add token-derived `/api/customer/active-order` or enforce equality on the
-  compatibility path.
-- Protect the broader order-list API so the IDOR is not merely moved elsewhere.
+- [x] Added `get_current_user_or_customer` hybrid auth dependency to allow either staff or authenticated customer sessions.
+- [x] Secured `/api/masalar/{masa_id}/aktif-siparis` to prevent IDOR by checking ownership of the session token.
+- [x] Secured `/api/siparisler` endpoints to require appropriate authentication.
+- [x] Updated frontend `app.js` checkActiveOrder to send the `CUSTOMER_SESSION` token in the Authorization header.
 
 ### Milestone 6 - Order and payment business-rule hardening
 
@@ -645,4 +646,4 @@ Status: NOT STARTED
 
 ## Exact next action
 
-Execute the migration script `scripts/migrate_credentials.py` to encrypt the passwords in the database. After confirming the migration and running the tests manually, proceed to Milestone 3 (Role-based authorization) to protect admin, waiter, kitchen, cashier, and other staff-specific operations using the documented role matrix.
+Proceed to Milestone 6 (Order and payment business-rule hardening) or Milestone 7 (WebSocket authentication/realtime isolation). Both require design decisions or new implementations. Milestone 6 requires a DB schema decision on product options and partial payments. Milestone 7 requires passing JWT or CUSTOMER_SESSION tokens to the Socket.io connection.

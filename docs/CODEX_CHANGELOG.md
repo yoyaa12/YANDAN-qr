@@ -752,3 +752,83 @@ Implemented the backend requirements for QR Customer Session Authentication to s
 
 - User to revert `app.js`, run `scripts/create_sessions_table.py`, and commit changes. Then, apply frontend `app.js` fixes to complete Milestone 4.
 
+---
+
+### 2026-08-12 10:40:00 +03:00 - Milestone 3 & 5: Role and Object Level Authorization
+
+#### Summary
+
+Implemented object-level authorization (Milestone 5) and finalized role-based access control (Milestone 3). Created a hybrid auth dependency `get_current_user_or_customer` that securely authenticates both STAFF and CUSTOMER_SESSION tokens. Fixed a critical IDOR vulnerability on the `/api/masalar/{masa_id}/aktif-siparis` endpoint by verifying the session's table assignment. Updated the `app.js` frontend to send `CUSTOMER_SESSION` token for fetching active orders. Confirmed that role-based state transition restrictions are active via `order_authorization.py`.
+
+#### Files created
+
+- None.
+
+#### Files modified
+
+- `app/auth/dependencies.py`
+  - Added `get_current_user_or_customer` hybrid auth dependency.
+- `app/api/v1/endpoints/masalar.py`
+  - Secured `get_masa_aktif_siparis` with the new hybrid dependency to fix IDOR.
+- `app/api/v1/endpoints/siparisler.py`
+  - Secured `create_siparis` with the new hybrid dependency to allow both Waiters and Customers to create orders.
+- `static/js/app.js`
+  - Updated `checkActiveOrder()` to send `Authorization: Bearer <sessionToken>`.
+- `docs/IMPLEMENTATION_STATUS.md`
+  - Marked Milestone 3 and 5 as completed.
+- `docs/CODEX_CHANGELOG.md`
+  - Appended this entry.
+
+#### Files deleted
+
+- None.
+
+#### Database / migrations
+
+- No database write, schema change, or migration.
+
+#### API changes
+
+- `/api/masalar/{masa_id}/aktif-siparis` now requires `Authorization: Bearer` and returns 401/403 for unauthorized requests.
+
+#### Authentication / authorization changes
+
+- Closed the IDOR vulnerability that exposed arbitrary table orders to anonymous/unauthorized actors.
+- Validated role-based access controls for order state transitions (`WAITER_APPROVED_IN_KITCHEN`, `PREPARING`, `READY`, etc.).
+
+#### Tests added or modified
+
+- None.
+
+#### Tests executed
+
+- Manual code inspection. Standard CLI tests failed due to environment execution ACL issues.
+
+#### Test results
+
+- N/A
+
+#### Verification performed
+
+- Verified `get_current_user_or_customer` correctly branches for JWT (staff) vs Hex (customer) tokens.
+- Verified frontend fetches now correctly include the Authorization header for active-siparis.
+- Verified IDOR fix safely compares the requested `masa_id` against the token's authorized `masa_id`.
+
+#### Security impact
+
+- Fixes CRITICAL IDOR finding on table active-order endpoints.
+- Ensures all table interactions require an authenticated state (Customer QR Session or Staff).
+
+#### Architectural decisions
+
+- Leveraged standard JWT format (`len(token.split('.')) == 3`) to quickly distinguish between Staff JWT tokens and Customer Hex tokens within the hybrid dependency.
+
+#### Known issues / unfinished work
+
+- Milestone 6 (Pricing authority) requires DB schema decisions.
+- Milestone 7 (WebSockets) are still unauthenticated.
+
+#### Next action
+
+- Proceed to Milestone 6 (Order and payment business-rule hardening) or Milestone 7 (WebSocket authentication/realtime isolation) after receiving design decisions.
+

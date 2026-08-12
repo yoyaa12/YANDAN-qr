@@ -452,7 +452,25 @@ function toggleTrackingUI() {
 // SAYFA YENİLENDİĞİNDE VEYA SEKME DEĞİŞTİĞİNDE MÜŞTERİNİN TÜM AKTİF SİPARİŞLERİNİ GETİREN FONKSİYON
 async function checkActiveOrder() {
     try {
-        const res = await fetch(`/api/masalar/${state.masaId}/aktif-siparis`);
+        const sessionToken = localStorage.getItem('qr_session_token_' + state.masaId);
+        const headers = {};
+        if (sessionToken) {
+            headers['Authorization'] = 'Bearer ' + sessionToken;
+        }
+        const res = await fetch(`/api/masalar/${state.masaId}/aktif-siparis`, {
+            headers: headers
+        });
+
+        if (res.status === 401 || res.status === 403) {
+            // Token invalid or missing, clear orders
+            state.activeOrders = [];
+            state.currentOrder = null;
+            state.genelToplam = 0;
+            const container = document.getElementById('orderTrackingContainer');
+            if (container) container.style.display = 'none';
+            return;
+        }
+
         const data = await res.json();
 
         if (data.redirect_masa_id && parseInt(data.redirect_masa_id) !== parseInt(state.masaId)) {
@@ -644,8 +662,8 @@ function renderProductCardHTML(prod) {
         stockBadgeHTML = `<div style="font-size:0.65rem; font-weight:800; color:#fdba74; background:rgba(234,88,12,0.2); border:1px solid rgba(234,88,12,0.4); padding:1px 5px; border-radius:4px; white-space:nowrap; margin-top:2px; max-width:100%; overflow:hidden; text-overflow:ellipsis;">⚡ Son ${stock} Adet!</div>`;
     }
 
-    const cardOnClick = isOutOfStock 
-        ? `onclick="showToast('⛔ Stok Tükendi')"` 
+    const cardOnClick = isOutOfStock
+        ? `onclick="showToast('⛔ Stok Tükendi')"`
         : `onclick="openProductNoteModal(${prod.id})"`;
 
     return `

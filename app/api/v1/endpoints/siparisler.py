@@ -24,20 +24,20 @@ authenticated_staff = require_roles(
 order_editor = require_roles(UserRole.ADMIN, UserRole.WAITER)
 
 from fastapi import HTTPException
-
-from app.auth.dependencies import get_current_customer
+from app.auth.dependencies import get_current_user_or_customer
 
 @router.post("/siparisler", response_model=SiparisIslemCevapModel)
 async def create_siparis(
     data: SiparisOlusturModel,
     service: SiparisService = Depends(),
-    customer_session: dict = Depends(get_current_customer)
+    actor: StaffPrincipal | dict = Depends(get_current_user_or_customer)
 ):
-    if customer_session["masa_id"] != data.masa_id:
-        raise HTTPException(
-            status_code=403,
-            detail="Bu oturum ile sadece yetkili olduğunuz masaya sipariş verebilirsiniz."
-        )
+    if isinstance(actor, dict):
+        if actor["masa_id"] != data.masa_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Bu oturum ile sadece yetkili olduğunuz masaya sipariş verebilirsiniz."
+            )
         
     full_order = await service.create_siparis(data)
     return {"status": "success", "message": "Sipariş oluşturuldu.", "siparis": full_order}

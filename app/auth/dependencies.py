@@ -125,3 +125,24 @@ def get_current_customer(
         )
         
     return session
+
+def get_current_user_or_customer(
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None,
+        Security(staff_bearer),
+    ],
+    repo: Annotated[AuthRepository, Depends()],
+) -> StaffPrincipal | dict:
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Geçerli bir oturum token'ı gerekli.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    token = credentials.credentials
+    # A standard JWT has three parts separated by dots
+    if len(token.split(".")) == 3:
+        return get_current_staff(credentials, repo)
+    else:
+        return get_current_customer(credentials, repo)

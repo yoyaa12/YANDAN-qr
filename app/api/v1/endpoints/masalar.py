@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from typing import List
-from app.auth.dependencies import require_roles
+from app.auth.dependencies import require_roles, get_current_user_or_customer
+from app.auth.models import StaffPrincipal
 from app.enums import UserRole
 from app.services.masa_service import MasaService
 from app.services.siparis_service import SiparisService
@@ -22,7 +23,17 @@ async def get_masalar(service: MasaService = Depends()):
     return service.get_masalar_with_browsing()
 
 @router.get("/masalar/{masa_id}/aktif-siparis")
-async def get_masa_aktif_siparis(masa_id: int, siparis_service: SiparisService = Depends()):
+async def get_masa_aktif_siparis(
+    masa_id: int, 
+    siparis_service: SiparisService = Depends(),
+    actor: StaffPrincipal | dict = Depends(get_current_user_or_customer)
+):
+    if isinstance(actor, dict):
+        if actor["masa_id"] != masa_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Bu masanın siparişlerini görüntüleme yetkiniz yok."
+            )
     return siparis_service.get_masa_aktif_siparis(masa_id)
 
 @router.post(
