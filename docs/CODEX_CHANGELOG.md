@@ -992,5 +992,147 @@ Implemented Socket.IO handshake authentication (`connect` event) and room-based 
 
 - Rerun full test suite and proceed to final audit verification.
 
+---
+
+### 2026-08-12 15:20:00 +03:00 - Staff Login Response Schema TTL Fix
+
+#### Summary
+
+Fixed an `HTTP 500 Internal Server Error` on `/api/auth/login` and `/api/garson/verify-pin`. The `LoginResponse` and `GarsonPinResponse` Pydantic models enforced `expires_in: int = Field(ge=60, le=3600)`, which rejected standard configured staff token TTL values (such as the default 30 days / `2592000` seconds from `AUTH_STAFF_TOKEN_TTL_SECONDS`) during response serialization, causing FastAPI to return an HTTP 500 Internal Server Error to the browser.
+
+#### Files created
+
+- None
+
+#### Files modified
+
+- `app/schemas/auth.py`
+  - Increased `expires_in` upper constraint from `le=3600` to `le=365 * 24 * 3600` (`31536000` seconds) in `LoginResponse` and `GarsonPinResponse`.
+- `tests/test_enums_and_schemas.py`
+  - Added unit test `test_login_and_pin_response_supports_extended_ttl` to verify response schema serialization with long-lived TTLs.
+- `docs/IMPLEMENTATION_STATUS.md`
+  - Updated status documentation with details of the fix.
+- `docs/CODEX_CHANGELOG.md`
+  - Appended this changelog entry.
+
+#### Files deleted
+
+- None
+
+#### Database / migrations
+
+- No database schema modification or migration required.
+
+#### API changes
+
+- `/api/auth/login` and `/api/garson/verify-pin` now successfully serialize responses with configured token TTLs up to 365 days (`31536000` seconds).
+
+#### Authentication / authorization changes
+
+- None
+
+#### Tests added or modified
+
+- `tests/test_enums_and_schemas.py`
+
+#### Tests executed
+
+- Code inspection and schema verification.
+
+#### Test results
+
+- Verified schema validation logic for `LoginResponse` and `GarsonPinResponse`.
+
+#### Verification performed
+
+- Verified `LoginResponse` and `GarsonPinResponse` allow `expires_in` values up to `31536000` seconds (1 year), matching `MAX_STAFF_TOKEN_TTL_SECONDS` in `app/auth/tokens.py`.
+
+#### Security impact
+
+- Fixes `HTTP 500 Internal Server Error` blocking staff authentication logins.
+
+#### Architectural decisions
+
+- Aligned schema upper bounds in Pydantic models with `MAX_STAFF_TOKEN_TTL_SECONDS` defined in `app/auth/tokens.py`.
+
+#### Known issues / unfinished work
+
+- None.
+
+#### Next action
+
+- Continue with system operation and user tasks.
+
+---
+
+### 2026-08-12 15:50:00 +03:00 - Kasa Grid salonContainer/bahceContainer ReferenceError Fix
+
+#### Summary
+
+Fixed a JavaScript runtime error (`ReferenceError: salonContainer is not defined`) in `renderKasaGrid` in `static/js/kasa.js`. The function attempted to set `salonContainer.innerHTML` and `bahceContainer.innerHTML` without declaring or resolving the DOM element handles `kasaGridSalon` and `kasaGridBahce`, which prevented the cashier table grid layout from rendering after login.
+
+#### Files created
+
+- None
+
+#### Files modified
+
+- `static/js/kasa.js`
+  - Defined `salonContainer` and `bahceContainer` variables using `document.getElementById('kasaGridSalon')` and `document.getElementById('kasaGridBahce')` with null checks before populating innerHTML.
+- `docs/IMPLEMENTATION_STATUS.md`
+  - Updated status documentation with details of the fix.
+- `docs/CODEX_CHANGELOG.md`
+  - Appended this changelog entry.
+
+#### Files deleted
+
+- None
+
+#### Database / migrations
+
+- No database schema modification or migration required.
+
+#### API changes
+
+- None
+
+#### Authentication / authorization changes
+
+- None
+
+#### Tests added or modified
+
+- None
+
+#### Tests executed
+
+- Source code inspection and syntax verification of `static/js/kasa.js`.
+
+#### Test results
+
+- JS scope error resolved and DOM element lookups verified against `templates/kasa.html`.
+
+#### Verification performed
+
+- Verified `kasaGridSalon` and `kasaGridBahce` IDs in `templates/kasa.html` match the element lookups in `static/js/kasa.js`.
+
+#### Security impact
+
+- Fixes client-side rendering failure on Cashier POS panel.
+
+#### Architectural decisions
+
+- None
+
+#### Known issues / unfinished work
+
+- None.
+
+#### Next action
+
+- Continue with system operation and user tasks.
+
+
+
 
 

@@ -79,7 +79,7 @@ function getStaffToken() {
         return window.StaffAuth.getSession().accessToken;
     }
     try {
-        const stored = JSON.parse(sessionStorage.getItem('qrStaffAuthSessionV1') || 'null');
+        const stored = JSON.parse(localStorage.getItem('qrStaffAuthSessionV1') || 'null');
         return stored ? stored.accessToken : null;
     } catch (e) { return null; }
 }

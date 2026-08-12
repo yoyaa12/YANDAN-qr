@@ -10,7 +10,7 @@ from app.enums import (
     TableStatus,
     UserRole,
 )
-from app.schemas.auth import GarsonResponse, KullaniciResponse
+from app.schemas.auth import GarsonPinResponse, GarsonResponse, KullaniciResponse, LoginResponse
 from app.schemas.orders import (
     DurumGuncelleModel,
     SiparisOlusturModel,
@@ -30,6 +30,25 @@ class EnumAndSchemaTests(unittest.TestCase):
 
     def test_legacy_waiter_response_export_is_preserved(self):
         self.assertIs(CompatibilityWaiterResponse, GarsonResponse)
+
+    def test_login_and_pin_response_supports_extended_ttl(self):
+        user = KullaniciResponse(id=1, kullanici_adi="kasa1", rol=UserRole.CASHIER)
+        login_resp = LoginResponse(
+            status="success",
+            user=user,
+            access_token="test_token",
+            expires_in=2592000,
+        )
+        self.assertEqual(login_resp.expires_in, 2592000)
+
+        garson = KullaniciResponse(id=1, garson_adi="garson1", rol=UserRole.WAITER)
+        garson_resp = GarsonPinResponse(
+            status="success",
+            garson=garson,
+            access_token="test_token",
+            expires_in=2592000,
+        )
+        self.assertEqual(garson_resp.expires_in, 2592000)
 
     def test_current_frontend_order_payload_remains_compatible(self):
         payload = {

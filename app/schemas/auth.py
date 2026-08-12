@@ -35,7 +35,7 @@ class LoginResponse(BaseModel):
     user: KullaniciResponse
     access_token: str
     token_type: Literal["bearer"] = "bearer"
-    expires_in: int = Field(ge=60, le=3600)
+    expires_in: int = Field(ge=60, le=365 * 24 * 3600)
 
 
 class GarsonPinResponse(BaseModel):
@@ -43,4 +43,4 @@ class GarsonPinResponse(BaseModel):
     garson: KullaniciResponse
     access_token: str
     token_type: Literal["bearer"] = "bearer"
-    expires_in: int = Field(ge=60, le=3600)
+    expires_in: int = Field(ge=60, le=365 * 24 * 3600)

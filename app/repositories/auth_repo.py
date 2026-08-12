@@ -59,3 +59,7 @@ class AuthRepository:
     def revoke_customer_session(self, session_token_hash: str):
         query = "UPDATE CustomerSessions SET is_active = 0 WHERE session_token_hash = ?"
         self.db.execute_non_query(query, (session_token_hash,))
+
+    def revoke_all_sessions_for_masa(self, masa_id: int):
+        query = "UPDATE CustomerSessions SET is_active = 0 WHERE masa_id = ?"
+        self.db.execute_non_query(query, (masa_id,))

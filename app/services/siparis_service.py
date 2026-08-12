@@ -279,6 +279,7 @@ class SiparisService:
             is_redirected = True
 
         siparisler = self.siparis_repo.get_all_active_by_masa_id(target_masa_id)
+        alinan_tutar = self.siparis_repo.get_masa_tahsilat_toplami(target_masa_id)
         if siparisler:
             s_dtos = [self._map_to_siparis_response(s) for s in siparisler]
             genel_toplam = sum(s.toplam_tutar for s in s_dtos if s.toplam_tutar)
@@ -286,10 +287,11 @@ class SiparisService:
                 "has_active": True,
                 "siparisler": [s.model_dump(mode="json") for s in s_dtos],
                 "siparis": s_dtos[-1].model_dump(mode="json"),
-                "genel_toplam": genel_toplam
+                "genel_toplam": genel_toplam,
+                "alinan_tutar": alinan_tutar
             }
         else:
-            res = {"has_active": False, "siparisler": [], "siparis": None, "genel_toplam": 0.0}
+            res = {"has_active": False, "siparisler": [], "siparis": None, "genel_toplam": 0.0, "alinan_tutar": alinan_tutar}
 
         if is_redirected:
             t_table = self.masa_repo.get_by_id(target_masa_id)
@@ -383,6 +385,8 @@ class SiparisService:
         with db_transaction():
             self.masa_repo.update_durum(masa_id, TableStatus.EMPTY.value)
             self.siparis_repo.clear_active_orders_for_masa(masa_id)
+            self.siparis_repo.close_tahsilatlar_for_masa(masa_id)
+            self.auth_repo.revoke_all_sessions_for_masa(masa_id)
             clear_browsing_table(masa_id)
             TABLE_MOVES_MAP.pop(masa_id, None)
             for k, v in list(TABLE_MOVES_MAP.items()):
@@ -452,3 +456,11 @@ class SiparisService:
             {"masa_id": to_masa_id, "durum": TableStatus.OCCUPIED.value, "is_move": True},
         )
         await event_bus.publish("durum_guncellendi", event_payload)
+
+    async def add_tahsilat(self, masa_id: int, tutar: float, odeme_yontemi: str):
+        with db_transaction():
+            self.siparis_repo.add_masa_tahsilat(masa_id, tutar, odeme_yontemi)
+            
+        event_payload = {"masa_id": masa_id}
+        await event_bus.publish("durum_guncellendi", event_payload)
+        return {"status": "success", "message": "Tahsilat eklendi."}

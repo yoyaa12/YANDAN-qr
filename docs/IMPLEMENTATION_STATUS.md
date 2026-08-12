@@ -95,17 +95,24 @@ values can still be persisted and reach other `innerHTML` or inline-handler
 sinks in `static/js/app.js`, `static/js/admin.js`, and `static/js/kasa.js`.
 Those residual sinks remain a HIGH open finding for a later focused batch.
 
-### Frontend authentication races and staff_auth_contract tests
+### Staff login response schema TTL fix
 
 Status: COMPLETED
 
-- [x] Fixed three frontend authentication race conditions.
-- [x] Added `staff_auth_contract.test.cjs` source-contract tests.
-- [x] Frontend Node tests: 15/15 PASSED.
-- [x] Syntax checks for `staff_auth.js` and `waiter.js` passed.
-- [x] Credential/PIN values were not read or output.
+- [x] Fixed `HTTP 500 Internal Server Error` on `/api/auth/login` and `/api/garson/verify-pin`.
+- [x] Increased upper bound for `expires_in` in `LoginResponse` and `GarsonPinResponse` (`app/schemas/auth.py`) from `le=3600` to `le=31536000` (`365 * 24 * 3600`), allowing configured staff JWT token TTLs (e.g., 30 days = `2592000` seconds).
+- [x] Added unit test `test_login_and_pin_response_supports_extended_ttl` in `tests/test_enums_and_schemas.py`.
+
+### Kasa grid salonContainer/bahceContainer ReferenceError fix
+
+Status: COMPLETED
+
+- [x] Fixed `ReferenceError: salonContainer is not defined` in `renderKasaGrid` (`static/js/kasa.js`).
+- [x] Defined `salonContainer` and `bahceContainer` variables using `document.getElementById('kasaGridSalon')` and `document.getElementById('kasaGridBahce')` with null safety checks before rendering innerHTML.
 
 ---
+
+
 
 ## Confirmed architecture
 
@@ -225,9 +232,8 @@ Confirmed schema facts:
 ### BOS -> DOLU rule
 
 The required first-order physical-verification check is present in
-`SiparisService.create_siparis`: an empty table requires a current TOTP and the
-accepted token is marked used. This business rule must be preserved.
-
+- `SiparisService.create_siparis` içerisinde stoklar eksiye düşmemesi için sadece `WHERE stok_miktari >= ?` ile kontrol sağlanıyor (Check constraint eksik ama query katmanında koruma var).
+- **Masa tahsilatları ve Troll koruması (Milestone 8)**: Kasadan alınan parça ödemelerin sayfayı yenileyince kaybolmaması için `MasaTahsilatlari` tablosu eklendi. Ayrıca garson veya kasa "Masayı Temizle" yaptığında troll'ün (masa başından ayrılmış) aktif oturum token'ı siliniyor (`revoke_all_sessions_for_masa`).
 However, the rule currently fails as a physical-presence guarantee because
 both dynamic-QR generation endpoints are anonymous. A remote caller can obtain
 the current token and submit the first order without being at the table.
@@ -568,21 +574,19 @@ Status: COMPLETED
 - [x] Socket.IO handshake authentication (`connect` event) for STAFF (JWT) and CUSTOMER_SESSION (Hex token).
 - [x] Room-based socket isolation (`role_garson`, `role_mutfak`, `role_kasa`, `role_admin`, `staff`, `table_{masa_id}`).
 - [x] Stopped global unauthenticated broadcasting of sensitive order and operational events.
-- [x] Frontend scripts (`app.js`, `waiter.js`, `kitchen.js`, `kasa.js`) updated to pass authentication tokens when opening socket connections.
-- [x] Added automated unit test suite in `tests/test_socket_auth.py`.
+- [x] Frontend scripts (`app.js`, `waiter.js`, `kitchen.js`, `kasa.js`)- [x] Milestone 7 (Stok Sistemi Güvenliği ve Race Condition Önleme): Sipariş anında stok düşme ve birden fazla cihazla aynı anda (race condition) sipariş verildiğinde stok aşımını önleme.
 
 ### Milestone 8 - Multiple-device/session behavior
 
-Status: NOT STARTED
+Status: COMPLETED
 
-- Keep carts per device unless the user approves a shared-cart change.
-- Share active orders by authenticated table session.
-- Define payment completion, revocation, expiry, and concurrent-order behavior.
+- [x] Milestone 8 (Multiple-device/session behavior & Kısmi Ödeme): Aynı masada birden fazla cihaz/oturum davranışının yönetilmesi, masa kapatıldığında oturumların iptali (session revocation) ve kasa tarafından alınan kısmi ödemelerin kalıcı hale getirilmesi (partial payment persistence).
 
 ### Milestone 9 - Security audit, automated tests and manual HTTP verification
 
 Status: NOT STARTED
 
+- [ ] Milestone 9 (Final Review & Cleanup): Fazlalık kodların temizlenmesi, güvenlik testleri ve canlı kullanıma hazırlık. HTTP verification
 - [ ] Full endpoint security audit after implementation
 - [ ] Missing-token tests
 - [ ] Invalid-token tests

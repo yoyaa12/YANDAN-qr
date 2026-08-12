@@ -161,3 +161,19 @@ class SiparisRepository:
                 OrderStatus.PAID_CLOSED.value,
             ),
         )
+
+    def add_masa_tahsilat(self, masa_id: int, tutar: float, odeme_yontemi: str):
+        query = """
+            INSERT INTO MasaTahsilatlari (masa_id, tutar, odeme_yontemi, is_closed)
+            VALUES (?, ?, ?, 0)
+        """
+        self.db.execute_non_query(query, (masa_id, tutar, odeme_yontemi))
+
+    def get_masa_tahsilat_toplami(self, masa_id: int) -> float:
+        query = "SELECT SUM(tutar) as toplam FROM MasaTahsilatlari WHERE masa_id = ? AND is_closed = 0"
+        res = self.db.execute_query(query, (masa_id,), fetch_one=True)
+        return float(res['toplam']) if res and res['toplam'] else 0.0
+
+    def close_tahsilatlar_for_masa(self, masa_id: int):
+        query = "UPDATE MasaTahsilatlari SET is_closed = 1 WHERE masa_id = ? AND is_closed = 0"
+        self.db.execute_non_query(query, (masa_id,))

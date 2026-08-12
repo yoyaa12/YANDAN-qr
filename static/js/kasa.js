@@ -17,12 +17,12 @@ let ticketViewMode = 'grouped'; // 'grouped' veya 'batches'
 let expandedGroupDetailsMap = {};
 let renderedGroupKeys = [];
 
-window.setTicketViewMode = function(mode) {
+window.setTicketViewMode = function (mode) {
     ticketViewMode = mode;
     renderActiveTicketWorkstation();
 };
 
-window.toggleGroupDetails = function(groupIndex, event) {
+window.toggleGroupDetails = function (groupIndex, event) {
     if (event) event.stopPropagation();
     const groupKey = renderedGroupKeys[groupIndex];
     if (groupKey === undefined) return;
@@ -123,15 +123,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function loadKasaData() {
     try {
-        const [tablesRes, ordersRes, qrsRes] = await Promise.all([
+        const [tablesRes, ordersRes, qrsRes, tahsRes] = await Promise.all([
             fetch('/api/masalar'),
             fetch('/api/siparisler'),
-            fetch('/api/masalar/all-dynamic-qrs')
+            fetch('/api/masalar/all-dynamic-qrs'),
+            fetch('/api/masalar/all-tahsilatlar')
         ]);
         kasaTables = await tablesRes.json();
         kasaOrders = await ordersRes.json();
         if (qrsRes.ok) {
             kasaDynamicQRs = await qrsRes.json();
+        }
+        if (tahsRes.ok) {
+            partialPaymentsMap = await tahsRes.json();
         }
 
         updateFilterCounts();
@@ -254,9 +258,17 @@ function renderKasaGrid() {
         }
     });
 
-    salonContainer.innerHTML = salonHtml || `<div style="color:var(--text-muted); padding:20px; grid-column:1/-1; text-align:center;">Masa bulunamadı.</div>`;
-    bahceContainer.innerHTML = bahceHtml || `<div style="color:var(--text-muted); padding:20px; grid-column:1/-1; text-align:center;">Masa bulunamadı.</div>`;
+    const salonContainer = document.getElementById('kasaGridSalon');
+    const bahceContainer = document.getElementById('kasaGridBahce');
+
+    if (salonContainer) {
+        salonContainer.innerHTML = salonHtml || `<div style="color:var(--text-muted); padding:20px; grid-column:1/-1; text-align:center;">Masa bulunamadı.</div>`;
+    }
+    if (bahceContainer) {
+        bahceContainer.innerHTML = bahceHtml || `<div style="color:var(--text-muted); padding:20px; grid-column:1/-1; text-align:center;">Masa bulunamadı.</div>`;
+    }
 }
+
 
 window.selectKasaMasa = function (tableId) {
     if (isTableMoveMode) {
@@ -539,11 +551,11 @@ function renderActiveTicketWorkstation() {
                         <td style="text-align:center; font-weight:800; font-size:1rem; color:#cbd5e1; ${isFullyPaid ? 'text-decoration: line-through;' : ''}">${grp.toplam_adet}</td>
                         <td style="text-align:right; font-weight:700; color:#cbd5e1; ${isFullyPaid ? 'text-decoration: line-through;' : ''}">${grp.birim_fiyat.toFixed(2)} ₺</td>
                         <td style="text-align:right;">
-                            ${isFullyPaid 
-                                ? `<span style="background:rgba(16,185,129,0.2); color:#34d399; border:1px solid rgba(16,185,129,0.4); padding:3px 8px; border-radius:6px; font-size:0.8rem; font-weight:800;">✅ ÖDENDİ</span>` 
-                                : (wasIkram 
-                                    ? `<span style="background:rgba(239,68,68,0.2); color:#f87171; padding:2px 6px; border-radius:4px; font-weight:800; font-size:0.75rem;">🎁 İKRAM</span>` 
-                                    : `<span style="color:#64748b;">-</span>`)}
+                            ${isFullyPaid
+                        ? `<span style="background:rgba(16,185,129,0.2); color:#34d399; border:1px solid rgba(16,185,129,0.4); padding:3px 8px; border-radius:6px; font-size:0.8rem; font-weight:800;">✅ ÖDENDİ</span>`
+                        : (wasIkram
+                            ? `<span style="background:rgba(239,68,68,0.2); color:#f87171; padding:2px 6px; border-radius:4px; font-weight:800; font-size:0.75rem;">🎁 İKRAM</span>`
+                            : `<span style="color:#64748b;">-</span>`)}
                         </td>
                         <td style="text-align:right; font-weight:900; font-size:1.05rem; color:${isFullyPaid ? '#64748b' : (wasIkram ? '#f87171' : '#34d399')}; ${isFullyPaid ? 'text-decoration: line-through;' : ''}">
                             ${wasIkram ? '0.00 ₺' : `${grp.toplam_ara.toFixed(2)} ₺`}
@@ -621,9 +633,9 @@ function renderActiveTicketWorkstation() {
                                 ${createdTimeStr ? `<span style="font-size: 0.8rem; background: rgba(255,255,255,0.08); color: #cbd5e1; padding: 2px 8px; border-radius: 6px;">⏰ Saat: ${escapeHtml(createdTimeStr)}</span>` : ''}
                             </div>
                             <div>
-                                ${isPaid 
-                                    ? `<span style="background: rgba(16,185,129,0.2); color:#34d399; border:1px solid rgba(16,185,129,0.4); padding:3px 8px; border-radius:6px; font-size:0.8rem; font-weight:700;">✅ ÖDENDİ</span>` 
-                                    : `<span style="background: rgba(245,158,11,0.2); color:#fbbf24; border:1px solid rgba(245,158,11,0.4); padding:3px 8px; border-radius:6px; font-size:0.8rem; font-weight:700;">⏳ NAKİT TAHSİLAT BEKLİYOR</span>`}
+                                ${isPaid
+                        ? `<span style="background: rgba(16,185,129,0.2); color:#34d399; border:1px solid rgba(16,185,129,0.4); padding:3px 8px; border-radius:6px; font-size:0.8rem; font-weight:700;">✅ ÖDENDİ</span>`
+                        : `<span style="background: rgba(245,158,11,0.2); color:#fbbf24; border:1px solid rgba(245,158,11,0.4); padding:3px 8px; border-radius:6px; font-size:0.8rem; font-weight:700;">⏳ NAKİT TAHSİLAT BEKLİYOR</span>`}
                             </div>
                         </div>
 
@@ -674,11 +686,11 @@ function renderActiveTicketWorkstation() {
 function getActiveMasaSubtotal() {
     const table = kasaTables.find(t => t.id == activeMasaId);
     if (!table || table.durum === 'bos') return 0;
-    
-    const openMasaOrders = kasaOrders.filter(o => 
-        o.masa_id == table.id && 
-        o.odeme_durumu !== 'odendi' && 
-        o.siparis_durumu !== 'iptal' && 
+
+    const openMasaOrders = kasaOrders.filter(o =>
+        o.masa_id == table.id &&
+        o.odeme_durumu !== 'odendi' &&
+        o.siparis_durumu !== 'iptal' &&
         o.siparis_durumu !== 'odendi_kapatildi'
     );
 
@@ -975,6 +987,16 @@ window.processQuickPayment = async function (paymentMethod) {
     if (!partialPaymentsMap[activeMasaId]) partialPaymentsMap[activeMasaId] = 0;
     partialPaymentsMap[activeMasaId] += payAmount;
 
+    try {
+        await fetch(`/api/masalar/${activeMasaId}/tahsilat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tutar: payAmount, odeme_yontemi: paymentMethod })
+        });
+    } catch (e) {
+        console.error("Tahsilat kayıt hatası:", e);
+    }
+
     showPaymentFeedback(payAmount, paymentMethod);
 
     currentTableItems.forEach(i => i.selected = false);
@@ -1096,11 +1118,22 @@ window.executeConfirmedMainPayment = async function (shouldPrintAndClose = false
     if (!partialPaymentsMap[activeMasaId]) partialPaymentsMap[activeMasaId] = 0;
     partialPaymentsMap[activeMasaId] += totalInputPayment;
 
+    const paymentLabel = nakitPay > 0 && kartPay > 0 ? "Nakit + POS" : (nakitPay > 0 ? "Nakit" : "Kredi Kartı");
+
+    try {
+        await fetch(`/api/masalar/${activeMasaId}/tahsilat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tutar: totalInputPayment, odeme_yontemi: paymentLabel })
+        });
+    } catch (e) {
+        console.error("Tahsilat kayıt hatası:", e);
+    }
+
     if (document.getElementById('tutarNakitInput')) document.getElementById('tutarNakitInput').value = '';
     if (document.getElementById('tutarKartInput')) document.getElementById('tutarKartInput').value = '';
     currentTableItems.forEach(i => i.selected = false);
 
-    const paymentLabel = nakitPay > 0 && kartPay > 0 ? "Nakit + POS" : (nakitPay > 0 ? "Nakit" : "Kredi Kartı");
     showPaymentFeedback(totalInputPayment, paymentLabel);
 
     const updatedRemaining = Math.max(0, subtotal - calculatedDiscount - partialPaymentsMap[activeMasaId]);
@@ -1134,12 +1167,12 @@ window.executeConfirmedMainPayment = async function (shouldPrintAndClose = false
 window.clearActiveTableManually = async function () {
     if (!activeMasaId) return;
     const table = kasaTables.find(t => t.id == activeMasaId);
-    
+
     const masaNo = table ? getFormattedMasaNo(table.masa_no) : '';
     if (!confirm(`DİKKAT! ${masaNo} masasını zorla kapatmak ve temizlemek istediğinize emin misiniz? (Ödenmemiş siparişler varsa hepsi iptal edilecektir!)`)) {
         return;
     }
-    
+
     try {
         await fetch(`/api/masalar/${activeMasaId}/clear`, { method: 'POST' });
         delete partialPaymentsMap[activeMasaId];

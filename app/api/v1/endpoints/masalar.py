@@ -12,6 +12,11 @@ from app.schemas.tables import (
     QRDogrulamaResponse,
     VerifyQRModel,
 )
+from pydantic import BaseModel
+
+class TahsilatModel(BaseModel):
+    tutar: float
+    odeme_yontemi: str
 
 router = APIRouter()
 
@@ -62,6 +67,15 @@ async def get_all_dynamic_qrs(masa_service: MasaService = Depends()):
     """Tüm masaların canlı 30 saniyelik Dinamik QR verilerini döner."""
     return masa_service.get_all_dynamic_qrs()
 
+@router.get("/masalar/all-tahsilatlar")
+async def get_all_tahsilatlar(siparis_service: SiparisService = Depends()):
+    """Tüm masaların aktif tahsilat toplamlarını döner."""
+    masalar = siparis_service.masa_repo.get_all()
+    res = {}
+    for m in masalar:
+        res[str(m['id'])] = siparis_service.siparis_repo.get_masa_tahsilat_toplami(m['id'])
+    return res
+
 @router.get(
     "/masalar/{masa_id}/dynamic-qr",
     dependencies=[Depends(qr_display_operator)],
@@ -74,3 +88,12 @@ async def get_dynamic_qr(masa_id: int, masa_service: MasaService = Depends()):
 async def verify_dynamic_qr(masa_id: int, data: VerifyQRModel, masa_service: MasaService = Depends()):
     """Müşteri QR okuttuğunda gönderdiği dynamic token'ı doğrular."""
     return masa_service.verify_dynamic_qr_with_device(masa_id, data.token, data.device_id)
+
+@router.post(
+    "/masalar/{masa_id}/tahsilat",
+    response_model=GenelBasariliResponse,
+    dependencies=[Depends(table_operator)],
+)
+async def add_masa_tahsilat(masa_id: int, data: TahsilatModel, siparis_service: SiparisService = Depends()):
+    await siparis_service.add_tahsilat(masa_id, data.tutar, data.odeme_yontemi)
+    return GenelBasariliResponse(status="success", message="Tahsilat eklendi.")
