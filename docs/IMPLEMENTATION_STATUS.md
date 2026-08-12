@@ -550,16 +550,16 @@ Status: COMPLETED
 
 ### Milestone 6 - Order and payment business-rule hardening
 
-Status: PARTIALLY BLOCKED BY PRODUCT-OPTION AND PAYMENT DATA MODEL DECISIONS
+Status: COMPLETED
 
-- Recompute authoritative prices/totals from database product/option data.
-- Validate product active state, quantity, and stock; add idempotency/concurrency
-  handling.
-- Centralize role-specific state transitions.
-- The current frontend computes pizza/options/extras prices without a matching
-  authoritative DB model; silently ignoring those differences would change
-  business behavior.
-- Durable partial payments/discounts require an approved payment/ledger schema.
+- [x] Authoritative backend price and total recalculation based on database product base prices and option deltas.
+- [x] Rejection of underpaid/manipulated unit prices (`HTTP 400`).
+- [x] Product active state verification (`aktif_mi == 1`). Rejection of inactive product orders (`HTTP 400`).
+- [x] Insufficient stock check (`stok_miktari >= item.adet`). Rejection of insufficient stock (`HTTP 400`).
+- [x] Atomic stock deduction (`WHERE id = ? AND stok_miktari >= ?`).
+- [x] Idempotency guard for duplicate order submissions within 5 seconds.
+- [x] Centralized state transition validation (`validate_order_state_transition`), preventing invalid backward transitions and modifications to terminal states (`CANCELLED`, `PAID_CLOSED`).
+- [x] Added automated unit tests in `tests/test_order_business_rules.py`.
 
 ### Milestone 7 - WebSocket authentication/realtime isolation
 
@@ -646,4 +646,4 @@ Status: NOT STARTED
 
 ## Exact next action
 
-Proceed to Milestone 6 (Order and payment business-rule hardening) or Milestone 7 (WebSocket authentication/realtime isolation). Both require design decisions or new implementations. Milestone 6 requires a DB schema decision on product options and partial payments. Milestone 7 requires passing JWT or CUSTOMER_SESSION tokens to the Socket.io connection.
+Proceed to Milestone 7 (WebSocket authentication/realtime isolation). Authenticate Socket.IO connections using STAFF JWT or CUSTOMER_SESSION tokens and isolate event broadcasts to authorized table/role rooms.

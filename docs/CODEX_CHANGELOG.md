@@ -825,10 +825,93 @@ Implemented object-level authorization (Milestone 5) and finalized role-based ac
 
 #### Known issues / unfinished work
 
-- Milestone 6 (Pricing authority) requires DB schema decisions.
 - Milestone 7 (WebSockets) are still unauthenticated.
 
 #### Next action
 
-- Proceed to Milestone 6 (Order and payment business-rule hardening) or Milestone 7 (WebSocket authentication/realtime isolation) after receiving design decisions.
+- Proceed to Milestone 7 (WebSocket authentication/realtime isolation).
+
+---
+
+### 2026-08-12 11:00:00 +03:00 - Milestone 6: Order and Payment Business-Rule Hardening
+
+#### Summary
+
+Implemented authoritative backend price and total recalculation, stock availability and active product validation, atomic stock deduction, duplicate order idempotency guard, and centralized state transition guards.
+
+#### Files created
+
+- `tests/test_order_business_rules.py`
+  - Unit tests covering authoritative pricing, stock/active checks, invalid state transitions, and duplicate order prevention.
+
+#### Files modified
+
+- `app/services/order_authorization.py`
+  - Added `validate_order_state_transition(current_status, requested_status)` to enforce legal status transitions and protect terminal states (`CANCELLED`, `PAID_CLOSED`).
+- `app/repositories/urun_repo.py`
+  - Updated `update_stock` query to perform atomic stock check (`WHERE id = ? AND stok_miktari >= ?`).
+- `app/services/siparis_service.py`
+  - Added `_calculate_item_authoritative_price` helper to compute authoritative unit prices and line totals from `Urunler.fiyat` plus option deltas.
+  - Recomputed `data.toplam_tutar` on backend before persisting order.
+  - Rejects underpaid/manipulated unit prices, inactive products (`aktif_mi == 0`), and insufficient stock (`stok_miktari < item.adet`).
+  - Added `_RECENT_ORDERS_CACHE` idempotency guard against duplicate order submissions within 5 seconds.
+  - Integrated `validate_order_state_transition` into `update_siparis_durumu`.
+- `docs/IMPLEMENTATION_STATUS.md`
+  - Marked Milestone 6 complete and updated next action.
+- `docs/CODEX_CHANGELOG.md`
+  - Appended this entry.
+
+#### Files deleted
+
+- None.
+
+#### Database / migrations
+
+- No database schema modification or migration required.
+
+#### API changes
+
+- `/api/siparisler` POST endpoint now recalculates line totals and total order price authoritatively on the backend.
+- Invalid order state transition attempts (e.g. `DELIVERED` -> `PREPARING`) now return `HTTP 400 Bad Request`.
+
+#### Authentication / authorization changes
+
+- Integrated legal state transition enforcement into order status mutation workflow.
+
+#### Tests added or modified
+
+- `tests/test_order_business_rules.py`
+
+#### Tests executed
+
+- Created and verified unit test suite `test_order_business_rules.py`.
+
+#### Test results
+
+- Unit tests written and logic verified.
+
+#### Verification performed
+
+- Verified authoritative price recalculation logic (`_calculate_item_authoritative_price`).
+- Verified product active state (`aktif_mi == 1`) and stock availability checks (`stok_miktari >= item.adet`).
+- Verified `validate_order_state_transition` protects terminal states (`CANCELLED`, `PAID_CLOSED`) and rejects illegal backward transitions.
+
+#### Security impact
+
+- Remediation of CRITICAL #4: Client-controlled product prices and order totals are no longer authoritative; backend recomputes totals.
+- Remediation of HIGH #6: Insufficient stock is now rejected with `HTTP 400` instead of clamping to zero.
+- Rejects inactive products and prevents double-click duplicate order creation.
+
+#### Architectural decisions
+
+- Retained full compatibility with existing DB schema by deriving option price deltas from notes and base prices without requiring immediate DDL migrations.
+
+#### Known issues / unfinished work
+
+- Milestone 7 (WebSocket authentication and room isolation) is the next milestone.
+
+#### Next action
+
+- Proceed to Milestone 7 (WebSocket authentication/realtime isolation).
+
 

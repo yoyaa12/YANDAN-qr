@@ -1,5 +1,6 @@
 import uuid
 import datetime
+import time
 from fastapi import Depends, HTTPException
 from typing import Optional, List
 
@@ -13,7 +14,7 @@ from app.repositories.urun_repo import UrunRepository
 from app.repositories.auth_repo import AuthRepository
 from app.schemas.orders import DurumGuncelleModel, SiparisDuzenleModel, SiparisOlusturModel
 from app.schemas.orders import SiparisDurumResponse, SiparisResponse
-from app.services.order_authorization import enforce_order_status_role
+from app.services.order_authorization import enforce_order_status_role, validate_order_state_transition
 from app.database import db_transaction
 
 def sanitize_for_json(data):
@@ -29,6 +30,8 @@ def sanitize_for_json(data):
     return data
 
 TABLE_MOVES_MAP = {}
+_RECENT_ORDERS_CACHE = {}
+_IDEMPOTENCY_WINDOW_SECONDS = 5
 
 class SiparisService:
     def __init__(
@@ -59,24 +62,73 @@ class SiparisService:
             
         return odeme_durumu, siparis_durumu
 
+    def _calculate_item_authoritative_price(self, u_info: dict, item) -> tuple[float, float]:
+        base_price = float(u_info.get("fiyat", 0.0))
+        calculated_unit_price = base_price
+        note = (item.urun_notu or "").strip()
+
+        if "Orta Boy" in note:
+            calculated_unit_price += 40.0
+        elif "Büyük Boy" in note:
+            calculated_unit_price += 85.0
+        elif "En Büyük Boy" in note:
+            calculated_unit_price += 140.0
+
+        if "1.5 Porsiyon" in note:
+            calculated_unit_price += round(base_price * 0.40, 2)
+        elif "2 Porsiyon" in note or "Çift Porsiyon" in note:
+            calculated_unit_price += round(base_price * 0.80, 2)
+
+        if "Manda Kaymağı" in note:
+            calculated_unit_price += 35.0
+        if "Maraş Dondurması" in note:
+            calculated_unit_price += 40.0
+        if "Çikolata Sosu" in note:
+            calculated_unit_price += 25.0
+        if "Antep Fıstığı" in note:
+            calculated_unit_price += 30.0
+
+        expected_unit_price = round(calculated_unit_price, 2)
+
+        if item.birim_fiyat < base_price:
+            raise HTTPException(
+                status_code=400,
+                detail=f"'{u_info.get('urun_adi')}' için gönderilen birim fiyat ({item.birim_fiyat} TL) veritabanı taban fiyatından ({base_price} TL) düşük olamaz."
+            )
+
+        line_total = round(item.adet * expected_unit_price, 2)
+        return expected_unit_price, line_total
+
     def _process_order_items(self, siparis_id: int, urunler: list) -> List[dict]:
         detaylar = []
         for item in urunler:
-            ara_toplam = item.adet * item.birim_fiyat
-            self.siparis_repo.create_siparis_detay(
-                siparis_id, item.urun_id, item.adet, item.birim_fiyat, item.urun_notu or "", ara_toplam
-            )
-
             u_info = self.urun_repo.get_by_id(item.urun_id)
-            urun_adi = u_info['urun_adi'] if u_info else f"Ürün #{item.urun_id}"
+            if not u_info:
+                raise HTTPException(status_code=404, detail=f"Siparişteki Ürün #{item.urun_id} veritabanında bulunamadı!")
+
+            if not u_info.get("aktif_mi", True):
+                raise HTTPException(status_code=400, detail=f"'{u_info.get('urun_adi')}' isimli ürün satışa kapalıdır.")
+
+            current_stock = u_info.get("stok_miktari")
+            if current_stock is not None and current_stock < item.adet:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"'{u_info.get('urun_adi')}' için yetersiz stok! (Mevcut stok: {current_stock}, İstenen: {item.adet})"
+                )
+
+            authoritative_unit_price, ara_toplam = self._calculate_item_authoritative_price(u_info, item)
+
+            self.siparis_repo.create_siparis_detay(
+                siparis_id, item.urun_id, item.adet, authoritative_unit_price, item.urun_notu or "", ara_toplam
+            )
 
             self.urun_repo.update_stock(item.urun_id, item.adet)
 
             detaylar.append({
                 "urun_id": item.urun_id,
-                "urun_adi": urun_adi,
+                "urun_adi": u_info.get("urun_adi", f"Ürün #{item.urun_id}"),
                 "adet": item.adet,
-                "birim_fiyat": item.birim_fiyat,
+                "birim_fiyat": authoritative_unit_price,
                 "urun_notu": item.urun_notu or "",
                 "ara_toplam": ara_toplam
             })
@@ -115,6 +167,14 @@ class SiparisService:
             if banned:
                 raise HTTPException(status_code=403, detail="Erişiminiz engellendi. Cihazınız yasaklı.")
 
+        items_key = tuple(sorted((item.urun_id, item.adet, (item.urun_notu or "").strip()) for item in data.urunler))
+        cache_key = (data.masa_id, data.device_id or "no-device", items_key)
+        now = time.time()
+        if cache_key in _RECENT_ORDERS_CACHE:
+            ts, prev_resp = _RECENT_ORDERS_CACHE[cache_key]
+            if now - ts < _IDEMPOTENCY_WINDOW_SECONDS:
+                return prev_resp
+
         with db_transaction():
             if data.masa_id in TABLE_MOVES_MAP:
                 data.masa_id = TABLE_MOVES_MAP[data.masa_id]
@@ -131,6 +191,25 @@ class SiparisService:
                 totp_secret = masa.get("totp_secret")
                 if not totp_secret or not verify_dynamic_token(data.masa_id, totp_secret, data.current_totp_token, mark_as_used=True):
                     raise HTTPException(status_code=403, detail="Geçersiz veya süresi dolmuş kod! Lütfen masadaki ekranda yazan güncel 6 haneli güvenlik kodunu girin.")
+
+            calculated_order_total = 0.0
+            for item in data.urunler:
+                u_info = self.urun_repo.get_by_id(item.urun_id)
+                if not u_info:
+                    raise HTTPException(status_code=404, detail=f"Siparişteki Ürün #{item.urun_id} veritabanında bulunamadı!")
+                if not u_info.get("aktif_mi", True):
+                    raise HTTPException(status_code=400, detail=f"'{u_info.get('urun_adi')}' isimli ürün satışa kapalıdır.")
+                current_stock = u_info.get("stok_miktari")
+                if current_stock is not None and current_stock < item.adet:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"'{u_info.get('urun_adi')}' için yetersiz stok! (Mevcut stok: {current_stock}, İstenen: {item.adet})"
+                    )
+                _, line_total = self._calculate_item_authoritative_price(u_info, item)
+                calculated_order_total += line_total
+
+            calculated_order_total = round(calculated_order_total, 2)
+            data.toplam_tutar = calculated_order_total
 
             siparis_kodu = f"SIP-{uuid.uuid4().hex[:6].upper()}"
             odeme_durumu, siparis_durumu = self._determine_initial_status(data.odeme_yontemi)
@@ -166,6 +245,8 @@ class SiparisService:
                 "detaylar": detaylar
             }
             full_order = SiparisResponse.model_validate(full_order_dict)
+
+        _RECENT_ORDERS_CACHE[cache_key] = (now, full_order)
 
         await self._publish_order_events(
             data,
@@ -231,6 +312,8 @@ class SiparisService:
             s_info = self.siparis_repo.get_by_id(siparis_id)
             if not s_info:
                 raise HTTPException(status_code=404, detail="Sipariş bulunamadı!")
+
+            validate_order_state_transition(s_info.get("siparis_durumu", ""), data.yeni_durum)
 
             if yeni_durum in [OrderAction.CASH_COLLECTED.value, OrderStatus.PAID_CLOSED.value]:
                 self.siparis_repo.update_odeme_and_durum(

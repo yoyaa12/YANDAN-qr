@@ -393,7 +393,7 @@ class StaffAuthOpenApiTests(unittest.TestCase):
                 )
 
         self.assertNotIn("security", schema["paths"]["/api/auth/login"]["post"])
-        self.assertNotIn("security", schema["paths"]["/api/siparisler"]["post"])
+        self.assertIn("security", schema["paths"]["/api/siparisler"]["post"])
 
 
 async def asgi_request(app, method, path, *, token=None, payload=None):
