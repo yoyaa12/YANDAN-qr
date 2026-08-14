@@ -298,7 +298,11 @@ async function handleAddProduct(e) {
 }
 
 async function deleteCategory(id) {
-    if (!confirm("Kategoriyi silmek istediğinizden emin misiniz?")) return;
+    const onaylandi = await appConfirm("Kategoriyi silmek istediğinizden emin misiniz?", {
+        title: '🗑️ Kategoriyi Sil',
+        okText: 'Evet, sil'
+    });
+    if (!onaylandi) return;
     await fetch(`/api/admin/kategoriler/${id}`, { method: 'DELETE' });
     showAdminToast(`🗑️ Kategori #${id} silindi.`);
     await loadAdminCategories();
@@ -306,7 +310,11 @@ async function deleteCategory(id) {
 }
 
 async function deleteProduct(id) {
-    if (!confirm("Ürünü silmek istediğinizden emin misiniz?")) return;
+    const onaylandi = await appConfirm("Ürünü silmek istediğinizden emin misiniz?", {
+        title: '🗑️ Ürünü Sil',
+        okText: 'Evet, sil'
+    });
+    if (!onaylandi) return;
     await fetch(`/api/admin/urunler/${id}`, { method: 'DELETE' });
     showAdminToast(`🗑️ Ürün #${id} silindi.`);
     loadAdminProducts();

@@ -245,6 +245,8 @@
         if (pathname === '/api/masalar/move' && method === 'POST') return true;
         if (/^\/api\/masalar\/\d+\/clear$/.test(pathname) && method === 'POST') return true;
         if (pathname === '/api/masalar/all-dynamic-qrs' && method === 'GET') return true;
+        if (pathname === '/api/masalar/all-tahsilatlar' && method === 'GET') return true;
+        if (/^\/api\/masalar\/\d+\/tahsilat$/.test(pathname) && method === 'POST') return true;
         if (/^\/api\/masalar\/\d+\/dynamic-qr$/.test(pathname) && method === 'GET') return true;
         return false;
     }
@@ -300,6 +302,7 @@
     window.StaffAuth = Object.freeze({
         clearSession,
         getSession: () => currentSession,
+        getToken: () => currentSession ? currentSession.accessToken : (readStoredSession() ? readStoredSession().accessToken : null),
         setSessionFromLogin,
         waitForSession
     });

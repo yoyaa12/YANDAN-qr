@@ -233,10 +233,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     checkActiveOrder(); // F5 RECOVERY: Sayfa yenilendiğinde aktif siparişi getirir!
 
     // Socket.io Canlı Dinleyici (Otomatik Reconnection Ayarları)
-    const customerToken = localStorage.getItem('qr_customer_session_token') || sessionStorage.getItem('customer_session_token');
+    const customerToken = localStorage.getItem('qr_session_token_' + state.masaId) || localStorage.getItem('qr_customer_session_token') || sessionStorage.getItem('customer_session_token');
     socket = io({
-        auth: { token: customerToken },
-        query: { masa_id: state.masaId },
+        auth: { token: customerToken, masa_id: state.masaId },
+        query: { masa_id: state.masaId, token: customerToken || '' },
         reconnection: true,
         reconnectionAttempts: Infinity,
         reconnectionDelay: 1000,
@@ -1233,16 +1233,19 @@ window.changeModalQuantity = function (delta) {
     updateModalCalculatedPrice();
 };
 
-window.updateCartItemQuantity = function (index, delta) {
+window.updateCartItemQuantity = async function (index, delta) {
     if (!state.cart[index]) return;
 
     // Eğer adet 1 ise ve azaltılmak isteniyorsa onay isteyelim
     if (state.cart[index].adet === 1 && delta === -1) {
-        if (confirm("Bu ürünü sepetten kaldırmak istiyor musunuz?")) {
-            state.cart.splice(index, 1);
-        } else {
-            return; // Adeti 1'de tut, silme işlemini iptal et
-        }
+        const onaylandi = await appConfirm("Bu ürünü sepetten kaldırmak istiyor musunuz?", {
+            title: '🗑️ Sepetten Kaldır',
+            okText: 'Evet, kaldır'
+        });
+        if (!onaylandi) return; // Adeti 1'de tut, silme işlemini iptal et
+        // Onay beklenirken sepet degismis olabilir; indeks yeniden dogrulanir.
+        if (!state.cart[index]) return;
+        state.cart.splice(index, 1);
     } else {
         state.cart[index].adet += delta;
         if (state.cart[index].adet <= 0) {

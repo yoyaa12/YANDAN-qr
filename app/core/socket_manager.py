@@ -1,3 +1,4 @@
+import asyncio
 import socketio
 from urllib.parse import parse_qs
 from app.core.events import event_bus
@@ -15,13 +16,19 @@ BROWSING_TABLES = {}
 SID_TO_MASA = {}
 MASA_SESSIONS = {}
 
+# Yayın hedefleri. Her personel soketi hem "staff" hem de kendi "role_*" odasındadır;
+# bu yüzden tek bir emit çağrısında oda listesi verilir (socket.io alıcıları tekilleştirir).
+# Aynı yayını hem role_* hem staff odasına ayrı ayrı göndermek olayın iki kez düşmesine yol açar.
+ROOM_ALL_STAFF = "staff"
+ROOM_SERVICE_STAFF = ["role_garson", "role_kasa", "role_admin"]  # mutfak hariç
+
 
 def _extract_token_and_params(auth, environ):
     token = None
     masa_id_param = None
 
     if auth and isinstance(auth, dict):
-        token = auth.get("token") or auth.get("Authorization") or auth.get("token_hash")
+        token = auth.get("token") or auth.get("Authorization") or auth.get("token_hash") or auth.get("access_token")
         if "masa_id" in auth:
             try:
                 masa_id_param = int(auth["masa_id"])
@@ -30,15 +37,18 @@ def _extract_token_and_params(auth, environ):
 
     if "QUERY_STRING" in environ and environ["QUERY_STRING"]:
         qs = parse_qs(environ["QUERY_STRING"])
-        if not token and "token" in qs and qs["token"]:
-            token = qs["token"][0]
+        if not token:
+            for k in ("token", "access_token", "session_token", "auth_token"):
+                if k in qs and qs[k]:
+                    token = qs[k][0]
+                    break
         if not masa_id_param and "masa_id" in qs and qs["masa_id"]:
             try:
                 masa_id_param = int(qs["masa_id"][0])
             except (ValueError, TypeError):
                 pass
 
-    if token and token.startswith("Bearer "):
+    if token and isinstance(token, str) and token.startswith("Bearer "):
         token = token[7:].strip()
 
     return token, masa_id_param
@@ -46,63 +56,79 @@ def _extract_token_and_params(auth, environ):
 
 @sio.event
 async def connect(sid, environ, auth=None):
+    # 1. Transport Upgrade (polling -> websocket) veya Reconnect: Var olan oturum yetkilerini anında koru
+    existing = None
+    try:
+        existing = await sio.get_session(sid)
+        if existing and isinstance(existing, dict) and existing.get("user_type") != "ANONYMOUS":
+            if existing.get("user_type") == "STAFF":
+                role_val = existing.get("role")
+                if role_val:
+                    await sio.enter_room(sid, f"role_{role_val}")
+                    await sio.enter_room(sid, "staff")
+                    print(f"[Socket.io] Personel oturumu korundu (Transport Upgrade/Reconnect): sid: {sid}, rol: {role_val}")
+                    return
+            elif existing.get("user_type") == "CUSTOMER":
+                masa_id = existing.get("masa_id")
+                if masa_id:
+                    await sio.enter_room(sid, f"table_{masa_id}")
+                    return
+    except Exception:
+        pass
+
     token, masa_id_param = _extract_token_and_params(auth, environ)
     auth_data = {"user_type": "ANONYMOUS", "masa_id": masa_id_param}
 
     if token:
-        # 1. Staff JWT Token Kontrolü
+        # 2. Staff JWT Token Kontrolü (Tamamen In-Memory HMAC Doğrulaması - Event Loop Bloklamaz)
         if len(token.split(".")) == 3:
             try:
                 claims = decode_access_token(token, expected_type=TokenType.STAFF)
-                db = DatabaseSession()
-                repo = AuthRepository(db)
-                user = repo.get_staff_by_id(claims.subject)
-                if user and user.get("rol") == claims.role.value:
-                    role_val = claims.role.value
-                    sio.enter_room(sid, f"role_{role_val}")
-                    sio.enter_room(sid, "staff")
-                    auth_data = {
-                        "user_type": "STAFF",
-                        "role": role_val,
-                        "user_id": claims.subject,
-                        "username": user.get("kullanici_adi")
-                    }
-                    print(f"[Socket.io] Personel bağlandı: {user.get('kullanici_adi')} (Rol: {role_val}, sid: {sid})")
+                role_val = claims.role.value
+                await sio.enter_room(sid, f"role_{role_val}")
+                await sio.enter_room(sid, "staff")
+                auth_data = {
+                    "user_type": "STAFF",
+                    "role": role_val,
+                    "user_id": claims.subject,
+                    "username": f"User_{claims.subject}"
+                }
+                print(f"[Socket.io] Personel baglandi: ID {claims.subject} (Rol: {role_val}, sid: {sid})")
             except (TokenValidationError, AuthConfigurationError, Exception) as exc:
-                print(f"[Socket.io] Personel token doğrulama hatası: {exc}")
+                print(f"[Socket.io] Personel token dogrulama hatasi: {exc}")
 
-        # 2. Müşteri Session Token Kontrolü (Hex Token)
+        # 3. Müşteri Session Token Kontrolü (Thread Executor ile DB Sorgusu - Event Loop Bloklamaz)
         else:
             try:
                 db = DatabaseSession()
                 repo = AuthRepository(db)
                 service = AuthService(repo)
-                customer_session = service.verify_customer_session(token)
+                customer_session = await asyncio.to_thread(service.verify_customer_session, token)
                 if customer_session:
                     masa_id = int(customer_session["masa_id"])
-                    sio.enter_room(sid, f"table_{masa_id}")
+                    await sio.enter_room(sid, f"table_{masa_id}")
                     SID_TO_MASA[sid] = masa_id
                     auth_data = {
                         "user_type": "CUSTOMER",
                         "masa_id": masa_id,
                         "session_token": token
                     }
-                    print(f"[Socket.io] Müşteri bağlandı: Masa {masa_id} (sid: {sid})")
+                    print(f"[Socket.io] Musteri baglandi: Masa {masa_id} (sid: {sid})")
             except Exception as exc:
-                print(f"[Socket.io] Müşteri session doğrulama hatası: {exc}")
+                print(f"[Socket.io] Musteri session dogrulama hatasi: {exc}")
 
-    # 3. Anonim/Public İstemci Masa Odası Katılımı
+    # 4. Anonim/Public İstemci Masa Odası Katılımı
     if auth_data["user_type"] == "ANONYMOUS" and masa_id_param:
-        sio.enter_room(sid, f"table_{masa_id_param}")
+        await sio.enter_room(sid, f"table_{masa_id_param}")
         SID_TO_MASA[sid] = masa_id_param
-        print(f"[Socket.io] Anonim istemci bağlandı: Masa {masa_id_param} (sid: {sid})")
+        print(f"[Socket.io] Anonim istemci baglandi: Masa {masa_id_param} (sid: {sid})")
 
     await sio.save_session(sid, auth_data)
 
 
 @sio.event
 async def disconnect(sid):
-    print(f"[Socket.io] İstemci ayrıldı: {sid}")
+    print(f"[Socket.io] Istemci ayrildi: {sid}")
     if sid in SID_TO_MASA:
         masa_id = SID_TO_MASA[sid]
         del SID_TO_MASA[sid]
@@ -142,8 +168,7 @@ async def musteri_oturdu(sid, data):
         "masa_id": masa_id,
         "masa_no": (data and data.get("masa_no")) or f"Masa {masa_id}"
     }
-    await sio.emit("garson_musteri_geldi", event_payload, room="role_garson")
-    await sio.emit("garson_musteri_geldi", event_payload, room="role_admin")
+    await sio.emit("garson_musteri_geldi", event_payload, room=["role_garson", "role_admin"])
 
 
 @sio.event
@@ -172,8 +197,7 @@ async def musteri_urun_secti(sid, data):
         "item_count": (data and data.get("item_count")) or 0,
         "last_item": (data and data.get("last_item")) or ""
     }
-    await sio.emit("garson_musteri_urun_secti", event_payload, room="role_garson")
-    await sio.emit("garson_musteri_urun_secti", event_payload, room="role_admin")
+    await sio.emit("garson_musteri_urun_secti", event_payload, room=["role_garson", "role_admin"])
 
 
 def get_browsing_tables():
@@ -189,10 +213,8 @@ def clear_browsing_table(masa_id: int):
 
 @event_bus.subscribe("yeni_siparis")
 async def on_yeni_siparis(payload):
-    await sio.emit("yeni_siparis", payload, room="role_mutfak")
-    await sio.emit("yeni_siparis", payload, room="role_garson")
-    await sio.emit("yeni_siparis", payload, room="role_kasa")
-    await sio.emit("yeni_siparis", payload, room="role_admin")
+    # Mutfak dahil tüm personel rolleri hedefte olduğu için tek "staff" odası yeterli
+    await sio.emit("yeni_siparis", payload, room=ROOM_ALL_STAFF)
 
 
 @event_bus.subscribe("masa_durumu_degisti")
@@ -208,23 +230,17 @@ async def on_masa_durumu_degisti(payload):
 
 @event_bus.subscribe("garson_onay_talebi")
 async def on_garson_onay_talebi(payload):
-    await sio.emit("garson_onay_talebi", payload, room="role_garson")
-    await sio.emit("garson_onay_talebi", payload, room="role_kasa")
-    await sio.emit("garson_onay_talebi", payload, room="role_admin")
+    await sio.emit("garson_onay_talebi", payload, room=ROOM_SERVICE_STAFF)
 
 
 @event_bus.subscribe("nakit_odeme_talebi")
 async def on_nakit_odeme_talebi(payload):
-    await sio.emit("nakit_odeme_talebi", payload, room="role_garson")
-    await sio.emit("nakit_odeme_talebi", payload, room="role_kasa")
-    await sio.emit("nakit_odeme_talebi", payload, room="role_admin")
+    await sio.emit("nakit_odeme_talebi", payload, room=ROOM_SERVICE_STAFF)
 
 
 @event_bus.subscribe("nakit_odendi")
 async def on_nakit_odendi(payload):
-    await sio.emit("nakit_odendi", payload, room="role_garson")
-    await sio.emit("nakit_odendi", payload, room="role_kasa")
-    await sio.emit("nakit_odendi", payload, room="role_admin")
+    await sio.emit("nakit_odendi", payload, room=ROOM_SERVICE_STAFF)
 
 
 @event_bus.subscribe("durum_guncellendi")
@@ -273,8 +289,8 @@ async def on_masa_tasindi(payload):
 
                 for sid in sids:
                     SID_TO_MASA[sid] = to_id
-                    sio.leave_room(sid, f"table_{from_id}")
-                    sio.enter_room(sid, f"table_{to_id}")
+                    await sio.leave_room(sid, f"table_{from_id}")
+                    await sio.enter_room(sid, f"table_{to_id}")
 
             if from_id in BROWSING_TABLES:
                 data = BROWSING_TABLES.pop(from_id)
@@ -289,7 +305,8 @@ async def on_masa_tasindi(payload):
         try:
             f_id = int(payload["from_masa_id"])
             t_id = int(payload.get("to_masa_id", f_id))
-            await sio.emit("masa_tasindi", payload, room=f"table_{f_id}")
-            await sio.emit("masa_tasindi", payload, room=f"table_{t_id}")
+            # Soketler yukarıda zaten yeni masaya taşındı; iki odayı tek çağrıda
+            # hedeflemek taşınan müşteriye olayın iki kez düşmesini engeller.
+            await sio.emit("masa_tasindi", payload, room=[f"table_{f_id}", f"table_{t_id}"])
         except (ValueError, TypeError):
             pass

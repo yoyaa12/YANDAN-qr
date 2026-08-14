@@ -38,46 +38,88 @@ function playKitchenAlertSound() {
 }
 
 function getStaffToken() {
+    if (window.StaffAuth && typeof window.StaffAuth.getToken === 'function') {
+        const t = window.StaffAuth.getToken();
+        if (t) return t;
+    }
     if (window.StaffAuth && window.StaffAuth.getSession()) {
         return window.StaffAuth.getSession().accessToken;
     }
     try {
-        const stored = JSON.parse(localStorage.getItem('qrStaffAuthSessionV1') || 'null');
-        return stored ? stored.accessToken : null;
-    } catch (e) { return null; }
+        const storedSession = JSON.parse(sessionStorage.getItem('qrStaffAuthSessionV1') || 'null');
+        if (storedSession && storedSession.accessToken) return storedSession.accessToken;
+        const storedLocal = JSON.parse(localStorage.getItem('qrStaffAuthSessionV1') || 'null');
+        if (storedLocal && storedLocal.accessToken) return storedLocal.accessToken;
+    } catch (e) {}
+    return null;
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-    loadKitchenOrders();
+async function authFetch(url, options = {}) {
+    const token = getStaffToken();
+    const headers = options.headers ? { ...options.headers } : {};
+    if (token) {
+        headers['Authorization'] = 'Bearer ' + token;
+    }
+    return fetch(url, { ...options, headers });
+}
 
-    // Socket.io Canlı Bağlantı & Gerçek Bağlantı Kontrolü
-    const socket = io({
-        auth: { token: getStaffToken() },
+let kitchenSocket = null;
+
+function initKitchenSocket() {
+    const token = getStaffToken();
+    if (kitchenSocket) {
+        try {
+            kitchenSocket.disconnect();
+        } catch (e) {}
+        kitchenSocket = null;
+    }
+
+    kitchenSocket = io({
+        auth: { token: token },
+        query: { token: token || '' },
         reconnection: true,
         reconnectionAttempts: Infinity,
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000
     });
 
-    socket.on('connect', () => {
+    kitchenSocket.on('connect', () => {
         updateKitchenSocketBadge(true);
     });
 
-    socket.on('disconnect', () => {
+    kitchenSocket.on('disconnect', () => {
         updateKitchenSocketBadge(false);
     });
 
     // 1. Ödemesi Yapılan Yeni Sipariş Mutfağa Düştü!
-    socket.on('yeni_siparis', (newOrder) => {
+    kitchenSocket.on('yeni_siparis', (newOrder) => {
         playKitchenAlertSound();
-        showKitchenToast(`🔔 YENİ SİPARİŞ! ${newOrder.masa_no} (${newOrder.siparis_kodu})`);
+        showKitchenToast(`🔔 YENİ SİPARİŞ! ${(newOrder && newOrder.masa_no) || 'Masa'} (${(newOrder && newOrder.siparis_kodu) || ''})`);
         loadKitchenOrders();
     });
 
     // 2. Durum Güncellemeleri
-    socket.on('durum_guncellendi', (data) => {
+    kitchenSocket.on('durum_guncellendi', (data) => {
         loadKitchenOrders();
     });
+}
+
+window.addEventListener('staff-authenticated', () => {
+    initKitchenSocket();
+    loadKitchenOrders();
+});
+
+window.addEventListener('staff-auth-cleared', () => {
+    if (kitchenSocket) {
+        kitchenSocket.disconnect();
+    }
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadKitchenOrders();
+    if (getStaffToken()) {
+        initKitchenSocket();
+    }
 });
 
 function updateKitchenSocketBadge(isConnected) {
@@ -95,10 +137,20 @@ function updateKitchenSocketBadge(isConnected) {
 
 async function loadKitchenOrders() {
     try {
-        const res = await fetch('/api/siparisler');
+        const res = await authFetch('/api/siparisler');
+        if (!res.ok) {
+            console.warn("Mutfak siparişleri yüklenemedi:", res.status);
+            kitchenOrders = [];
+            renderKitchenOrders();
+            return;
+        }
         const allOrders = await res.json();
         
-        kitchenOrders = allOrders.filter(o => ['odendi_mutfakta', 'garson_onayladi_mutfakta', 'nakit_tahsil_edildi', 'hazirlaniyor'].includes(o.siparis_durumu));
+        if (Array.isArray(allOrders)) {
+            kitchenOrders = allOrders.filter(o => ['odendi_mutfakta', 'garson_onayladi_mutfakta', 'nakit_tahsil_edildi', 'hazirlaniyor'].includes(o.siparis_durumu));
+        } else {
+            kitchenOrders = [];
+        }
         renderKitchenOrders();
     } catch (e) {
         console.error("Mutfak siparişleri yüklenemedi:", e);
@@ -186,7 +238,7 @@ function renderKitchenOrders() {
 
 async function updateOrderStatus(siparisId, yeniDurum) {
     try {
-        const res = await fetch(`/api/siparisler/${siparisId}/durum`, {
+        const res = await authFetch(`/api/siparisler/${siparisId}/durum`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ yeni_durum: yeniDurum })

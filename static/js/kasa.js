@@ -56,14 +56,98 @@ function updateDynamicQRBadgeTimers() {
 }
 
 function getStaffToken() {
+    if (window.StaffAuth && typeof window.StaffAuth.getToken === 'function') {
+        const t = window.StaffAuth.getToken();
+        if (t) return t;
+    }
     if (window.StaffAuth && window.StaffAuth.getSession()) {
         return window.StaffAuth.getSession().accessToken;
     }
     try {
-        const stored = JSON.parse(sessionStorage.getItem('qrStaffAuthSessionV1') || 'null');
-        return stored ? stored.accessToken : null;
-    } catch (e) { return null; }
+        const storedSession = JSON.parse(sessionStorage.getItem('qrStaffAuthSessionV1') || 'null');
+        if (storedSession && storedSession.accessToken) return storedSession.accessToken;
+        const storedLocal = JSON.parse(localStorage.getItem('qrStaffAuthSessionV1') || 'null');
+        if (storedLocal && storedLocal.accessToken) return storedLocal.accessToken;
+    } catch (e) { }
+    return null;
 }
+
+async function authFetch(url, options = {}) {
+    const token = getStaffToken();
+    const headers = options.headers ? { ...options.headers } : {};
+    if (token) {
+        headers['Authorization'] = 'Bearer ' + token;
+    }
+    return fetch(url, { ...options, headers });
+}
+
+/**
+ * Para ve masa kapatma gibi geri alinamaz POST'lar icin.
+ * Basarisiz yanitta hata firlatir; cagiran taraf kullaniciya bildirmek
+ * zorunda kalir. Sessizce yutulan 401/403/500 yuzunden "butona bastim ama
+ * bir sey olmadi" durumu olusmamali.
+ */
+async function apiPost(url, body) {
+    const options = { method: 'POST' };
+    if (body !== undefined) {
+        options.headers = { 'Content-Type': 'application/json' };
+        options.body = JSON.stringify(body);
+    }
+
+    const res = await authFetch(url, options);
+    if (!res.ok) {
+        let detail = '';
+        try {
+            const payload = await res.json();
+            if (payload && payload.detail) detail = payload.detail;
+        } catch (e) { }
+        throw new Error(detail || `Sunucu ${res.status} yanıtı döndü.`);
+    }
+    return res;
+}
+
+let kasaSocket = null;
+
+function initKasaSocket() {
+    const token = getStaffToken();
+    if (kasaSocket) {
+        try {
+            kasaSocket.disconnect();
+        } catch (e) { }
+        kasaSocket = null;
+    }
+
+    kasaSocket = io({
+        auth: { token: token },
+        query: { token: token || '' },
+        reconnection: true,
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 1000
+    });
+
+    kasaSocket.on('connect', () => updateKasaSocketBadge(true));
+    kasaSocket.on('disconnect', () => updateKasaSocketBadge(false));
+
+    kasaSocket.on('durum_guncellendi', () => loadKasaData());
+    kasaSocket.on('yeni_siparis', () => loadKasaData());
+    kasaSocket.on('masa_durumu_degisti', () => loadKasaData());
+    kasaSocket.on('masa_tasindi', () => loadKasaData());
+    kasaSocket.on('garson_onay_talebi', () => loadKasaData());
+    kasaSocket.on('nakit_odeme_talebi', () => loadKasaData());
+    kasaSocket.on('nakit_odendi', () => loadKasaData());
+    kasaSocket.on('masa_temizlendi', () => loadKasaData());
+}
+
+window.addEventListener('staff-authenticated', () => {
+    initKasaSocket();
+    loadKasaData();
+});
+
+window.addEventListener('staff-auth-cleared', () => {
+    if (kasaSocket) {
+        kasaSocket.disconnect();
+    }
+});
 
 document.addEventListener('DOMContentLoaded', () => {
     loadKasaData();
@@ -84,21 +168,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }, 1000);
 
-    const socket = io({
-        auth: { token: getStaffToken() },
-        reconnection: true,
-        reconnectionAttempts: Infinity,
-        reconnectionDelay: 1000
-    });
-
-    socket.on('connect', () => updateKasaSocketBadge(true));
-    socket.on('disconnect', () => updateKasaSocketBadge(false));
-
-    socket.on('durum_guncellendi', () => loadKasaData());
-    socket.on('yeni_siparis', () => loadKasaData());
-    socket.on('masa_durumu_degisti', () => loadKasaData());
-    socket.on('masa_tasindi', () => loadKasaData());
-    socket.on('garson_onay_talebi', () => loadKasaData());
+    if (getStaffToken()) {
+        initKasaSocket();
+    }
 
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
@@ -124,13 +196,17 @@ document.addEventListener('DOMContentLoaded', () => {
 async function loadKasaData() {
     try {
         const [tablesRes, ordersRes, qrsRes, tahsRes] = await Promise.all([
-            fetch('/api/masalar'),
-            fetch('/api/siparisler'),
-            fetch('/api/masalar/all-dynamic-qrs'),
-            fetch('/api/masalar/all-tahsilatlar')
+            authFetch('/api/masalar'),
+            authFetch('/api/siparisler'),
+            authFetch('/api/masalar/all-dynamic-qrs'),
+            authFetch('/api/masalar/all-tahsilatlar')
         ]);
-        kasaTables = await tablesRes.json();
-        kasaOrders = await ordersRes.json();
+        const tablesData = await tablesRes.json();
+        const ordersData = await ordersRes.json();
+
+        kasaTables = Array.isArray(tablesData) ? tablesData : [];
+        kasaOrders = Array.isArray(ordersData) ? ordersData : [];
+
         if (qrsRes.ok) {
             kasaDynamicQRs = await qrsRes.json();
         }
@@ -328,9 +404,11 @@ window.toggleRowSelection = function (index) {
 };
 
 window.paySingleSiparisBatch = async function (siparisId, tutar) {
-    if (!confirm(`Fiş #${siparisId} paketinin ${tutar.toFixed(2)} ₺ tutarındaki ödemesini alıp kapatmak istiyor musunuz?`)) {
-        return;
-    }
+    const onaylandi = await appConfirm(
+        `Fiş #${siparisId} paketinin ${tutar.toFixed(2)} ₺ tutarındaki ödemesini alıp kapatmak istiyor musunuz?`,
+        { title: '💵 Fiş Ödemesi', okText: 'Evet, ödemeyi al' }
+    );
+    if (!onaylandi) return;
     try {
         const res = await fetch(`/api/siparisler/${siparisId}/durum`, {
             method: 'PATCH',
@@ -982,20 +1060,24 @@ window.processQuickPayment = async function (paymentMethod) {
         confirmMsg += `kalan borç tutarı olan ${payAmount.toFixed(2)} ₺ (${paymentMethod}) olarak tahsil edilecek. Onaylıyor musunuz?`;
     }
 
-    if (!confirm(confirmMsg)) return;
+    const tahsilatOnayi = await appConfirm(confirmMsg, {
+        title: '💵 Tahsilat Onayı',
+        okText: 'Evet, tahsil et'
+    });
+    if (!tahsilatOnayi) return;
+
+    // Yerel toplam ancak sunucu tahsilatı kaydettikten sonra artırılır; aksi halde
+    // kasada alınmamış para alınmış gibi görünür.
+    try {
+        await apiPost(`/api/masalar/${activeMasaId}/tahsilat`, { tutar: payAmount, odeme_yontemi: paymentMethod });
+    } catch (e) {
+        console.error("Tahsilat kayıt hatası:", e);
+        showKasaToast(`⚠️ Tahsilat kaydedilemedi: ${e.message}`);
+        return;
+    }
 
     if (!partialPaymentsMap[activeMasaId]) partialPaymentsMap[activeMasaId] = 0;
     partialPaymentsMap[activeMasaId] += payAmount;
-
-    try {
-        await fetch(`/api/masalar/${activeMasaId}/tahsilat`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ tutar: payAmount, odeme_yontemi: paymentMethod })
-        });
-    } catch (e) {
-        console.error("Tahsilat kayıt hatası:", e);
-    }
 
     showPaymentFeedback(payAmount, paymentMethod);
 
@@ -1005,7 +1087,7 @@ window.processQuickPayment = async function (paymentMethod) {
 
     if (updatedRemaining <= 0.05) {
         try {
-            await fetch(`/api/masalar/${activeMasaId}/clear`, { method: 'POST' });
+            await apiPost(`/api/masalar/${activeMasaId}/clear`);
             delete partialPaymentsMap[activeMasaId];
             discountValue = 0;
             const masaNo = getFormattedMasaNo(table.masa_no);
@@ -1015,6 +1097,9 @@ window.processQuickPayment = async function (paymentMethod) {
             return;
         } catch (e) {
             console.error("Masa temizleme hatası:", e);
+            showKasaToast(`⚠️ Tahsilat alındı ancak masa kapatılamadı: ${e.message}`);
+            renderActiveTicketWorkstation();
+            return;
         }
     }
 
@@ -1115,20 +1200,19 @@ window.executeConfirmedMainPayment = async function (shouldPrintAndClose = false
 
     closeModal('posPaymentConfirmModal');
 
-    if (!partialPaymentsMap[activeMasaId]) partialPaymentsMap[activeMasaId] = 0;
-    partialPaymentsMap[activeMasaId] += totalInputPayment;
-
     const paymentLabel = nakitPay > 0 && kartPay > 0 ? "Nakit + POS" : (nakitPay > 0 ? "Nakit" : "Kredi Kartı");
 
     try {
-        await fetch(`/api/masalar/${activeMasaId}/tahsilat`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ tutar: totalInputPayment, odeme_yontemi: paymentLabel })
-        });
+        await apiPost(`/api/masalar/${activeMasaId}/tahsilat`, { tutar: totalInputPayment, odeme_yontemi: paymentLabel });
     } catch (e) {
         console.error("Tahsilat kayıt hatası:", e);
+        showKasaToast(`⚠️ Tahsilat kaydedilemedi: ${e.message}`);
+        pendingPaymentData = null;
+        return;
     }
+
+    if (!partialPaymentsMap[activeMasaId]) partialPaymentsMap[activeMasaId] = 0;
+    partialPaymentsMap[activeMasaId] += totalInputPayment;
 
     if (document.getElementById('tutarNakitInput')) document.getElementById('tutarNakitInput').value = '';
     if (document.getElementById('tutarKartInput')) document.getElementById('tutarKartInput').value = '';
@@ -1141,7 +1225,7 @@ window.executeConfirmedMainPayment = async function (shouldPrintAndClose = false
     if (shouldPrintAndClose) {
         printReceiptPreview();
         try {
-            await fetch(`/api/masalar/${activeMasaId}/clear`, { method: 'POST' });
+            await apiPost(`/api/masalar/${activeMasaId}/clear`);
             delete partialPaymentsMap[activeMasaId];
             discountValue = 0;
             const masaNo = getFormattedMasaNo(table.masa_no);
@@ -1152,6 +1236,10 @@ window.executeConfirmedMainPayment = async function (shouldPrintAndClose = false
             return;
         } catch (e) {
             console.error("Masa kapatma hatası:", e);
+            showKasaToast(`⚠️ Ödeme alındı ancak masa kapatılamadı: ${e.message}`);
+            pendingPaymentData = null;
+            renderActiveTicketWorkstation();
+            return;
         }
     } else {
         if (updatedRemaining <= 0.05) {
@@ -1169,12 +1257,14 @@ window.clearActiveTableManually = async function () {
     const table = kasaTables.find(t => t.id == activeMasaId);
 
     const masaNo = table ? getFormattedMasaNo(table.masa_no) : '';
-    if (!confirm(`DİKKAT! ${masaNo} masasını zorla kapatmak ve temizlemek istediğinize emin misiniz? (Ödenmemiş siparişler varsa hepsi iptal edilecektir!)`)) {
-        return;
-    }
+    const onaylandi = await appConfirm(
+        `${masaNo} masasını zorla kapatmak ve temizlemek üzeresiniz. Ödenmemiş siparişler varsa hepsi iptal edilecektir. Devam edilsin mi?`,
+        { title: '🧹 Masayı Zorla Kapat', okText: 'Evet, masayı kapat' }
+    );
+    if (!onaylandi) return;
 
     try {
-        await fetch(`/api/masalar/${activeMasaId}/clear`, { method: 'POST' });
+        await apiPost(`/api/masalar/${activeMasaId}/clear`);
         delete partialPaymentsMap[activeMasaId];
         discountValue = 0;
         showKasaToast(`🧹 ${masaNo} masası zorla kapatıldı ve temizlendi!`);
@@ -1182,6 +1272,7 @@ window.clearActiveTableManually = async function () {
         await loadKasaData();
     } catch (e) {
         console.error("Masa temizleme hatası:", e);
+        showKasaToast(`⚠️ ${masaNo} masası kapatılamadı: ${e.message}`);
     }
 };
 

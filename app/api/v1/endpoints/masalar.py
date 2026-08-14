@@ -67,7 +67,10 @@ async def get_all_dynamic_qrs(masa_service: MasaService = Depends()):
     """Tüm masaların canlı 30 saniyelik Dinamik QR verilerini döner."""
     return masa_service.get_all_dynamic_qrs()
 
-@router.get("/masalar/all-tahsilatlar")
+@router.get(
+    "/masalar/all-tahsilatlar",
+    dependencies=[Depends(table_operator)],
+)
 async def get_all_tahsilatlar(siparis_service: SiparisService = Depends()):
     """Tüm masaların aktif tahsilat toplamlarını döner."""
     masalar = siparis_service.masa_repo.get_all()

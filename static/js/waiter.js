@@ -12,6 +12,139 @@ let activeGarson = null;
 let pendingActionCallback = null;
 let activeBrowsingTables = {}; // { masa_id: { masa_no: 'Masa 1', time: Date.now() } }
 let activeDetailMasaId = null;
+let waiterSocket = null;
+
+function initWaiterSocket() {
+    const token = getStaffToken();
+    if (waiterSocket) {
+        try {
+            waiterSocket.disconnect();
+        } catch (e) {}
+        waiterSocket = null;
+    }
+
+    waiterSocket = io({
+        auth: { token: token },
+        query: { token: token || '' },
+        reconnection: true,
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000
+    });
+
+    waiterSocket.on('connect', () => {
+        updateWaiterSocketBadge(true);
+    });
+
+    waiterSocket.on('disconnect', () => {
+        updateWaiterSocketBadge(false);
+    });
+
+    // Müşteri QR Menüyü Açtığında (Masa Oturumu Başladı)
+    waiterSocket.on('garson_musteri_geldi', (data) => {
+        if (!data) return;
+        showWaiterToast(`👋 MÜŞTERİ GELDİ! ${data.masa_no} menüyü inceliyor.`);
+        const masaId = toPositiveInteger(data.masa_id);
+        if (masaId !== null) {
+            if (!activeBrowsingTables[masaId]) {
+                activeBrowsingTables[masaId] = { masa_no: data.masa_no, time: Date.now(), item_count: 0, last_item: '' };
+            }
+            renderWaiterDashboard();
+        }
+    });
+
+    // Müşteri Sepete Ürün Eklediğinde
+    waiterSocket.on('garson_musteri_urun_secti', (data) => {
+        if (!data) return;
+        const masaId = toPositiveInteger(data.masa_id);
+        if (masaId !== null) {
+            if (data.item_count > 0 && (!activeBrowsingTables[masaId] || activeBrowsingTables[masaId].item_count === 0)) {
+                showWaiterToast(`📖 MENÜ İNCELENİYOR! ${data.masa_no} sepete ürün ekledi (${data.last_item}).`);
+            }
+            activeBrowsingTables[masaId] = {
+                masa_no: data.masa_no,
+                time: Date.now(),
+                item_count: data.item_count,
+                last_item: data.last_item
+            };
+            renderWaiterDashboard();
+        }
+    });
+
+    // 1. Yeni Garson Onayı Bekleyen Sipariş
+    waiterSocket.on('garson_onay_talebi', (data) => {
+        playWaiterBellSound();
+        showWaiterToast(`🛎️ YENİ GARSON ONAY TALEBİ! ${(data && data.masa_no) || 'Masa'} (${data && data.toplam_tutar ? data.toplam_tutar.toFixed(2) : '0.00'} ₺)`);
+        loadWaiterData();
+    });
+
+    // 2. Yeni Nakit Ödeme Talebi
+    waiterSocket.on('nakit_odeme_talebi', (data) => {
+        playWaiterBellSound();
+        showWaiterToast(`💵 YENİ NAKİT ÖDEME TALEBİ! ${(data && data.masa_no) || 'Masa'} (${data && data.toplam_tutar ? data.toplam_tutar.toFixed(2) : '0.00'} ₺)`);
+        loadWaiterData();
+    });
+
+    // 3. Durum Güncellemeleri
+    waiterSocket.on('durum_guncellendi', (data) => {
+        if (data && data.yeni_durum === 'hazir') {
+            playWaiterBellSound();
+            showWaiterToast(`✅ SİPARİŞ HAZIR! ${(data.siparis && data.siparis.masa_no) || data.masa_no || 'Masa'} siparişi servise hazır.`);
+        }
+        loadWaiterData();
+    });
+
+    // 4. Yeni Sipariş
+    waiterSocket.on('yeni_siparis', (data) => {
+        loadWaiterData();
+    });
+
+    // 5. Nakit Ödendi
+    waiterSocket.on('nakit_odendi', (data) => {
+        loadWaiterData();
+    });
+
+    // 6. Masa Temizlendi / Oturum Kapandı
+    waiterSocket.on('masa_temizlendi', (data) => {
+        const masaId = toPositiveInteger(data && data.masa_id);
+        if (masaId !== null) {
+            delete activeBrowsingTables[masaId];
+        }
+        loadWaiterData();
+    });
+
+    // 7. Masa Taşındı
+    waiterSocket.on('masa_tasindi', (data) => {
+        loadWaiterData();
+    });
+
+    // 8. Masa Durumu Değişti
+    waiterSocket.on('masa_durumu_degisti', () => {
+        loadWaiterData();
+    });
+}
+
+async function loadWaiterData() {
+    try {
+        const res = await authFetch('/api/siparisler');
+        if (!res.ok) {
+            console.warn("Garson siparişleri yüklenemedi:", res.status);
+            allRawOrders = [];
+            waiterOrders = [];
+            renderWaiterDashboard();
+            return;
+        }
+        const data = await res.json();
+        allRawOrders = Array.isArray(data) ? data : [];
+        waiterOrders = allRawOrders.filter(o => o.siparis_durumu !== 'iptal' && o.siparis_durumu !== 'odendi_kapatildi');
+        renderWaiterDashboard();
+        if (activeDetailMasaId !== null) {
+            openMasaDetail(activeDetailMasaId);
+        }
+    } catch (e) {
+        console.error("Garson verileri yüklenemedi:", e);
+    }
+}
 
 window.addEventListener('staff-authenticated', event => {
     const user = event.detail && event.detail.user;
@@ -24,6 +157,8 @@ window.addEventListener('staff-authenticated', event => {
         updateActiveGarsonBadge();
         closeGarsonPinModal();
     }
+    initWaiterSocket();
+    loadWaiterData();
 });
 
 window.addEventListener('staff-auth-required', () => {
@@ -35,6 +170,9 @@ window.addEventListener('staff-auth-required', () => {
 window.addEventListener('staff-auth-cleared', () => {
     activeGarson = null;
     updateActiveGarsonBadge();
+    if (waiterSocket) {
+        waiterSocket.disconnect();
+    }
 });
 
 function toPositiveInteger(value) {
@@ -75,107 +213,38 @@ function playWaiterBellSound() {
 }
 
 function getStaffToken() {
+    if (window.StaffAuth && typeof window.StaffAuth.getToken === 'function') {
+        const t = window.StaffAuth.getToken();
+        if (t) return t;
+    }
     if (window.StaffAuth && window.StaffAuth.getSession()) {
         return window.StaffAuth.getSession().accessToken;
     }
     try {
-        const stored = JSON.parse(localStorage.getItem('qrStaffAuthSessionV1') || 'null');
-        return stored ? stored.accessToken : null;
-    } catch (e) { return null; }
+        const storedSession = JSON.parse(sessionStorage.getItem('qrStaffAuthSessionV1') || 'null');
+        if (storedSession && storedSession.accessToken) return storedSession.accessToken;
+        const storedLocal = JSON.parse(localStorage.getItem('qrStaffAuthSessionV1') || 'null');
+        if (storedLocal && storedLocal.accessToken) return storedLocal.accessToken;
+    } catch (e) {}
+    return null;
+}
+
+async function authFetch(url, options = {}) {
+    const token = getStaffToken();
+    const headers = options.headers ? { ...options.headers } : {};
+    if (token) {
+        headers['Authorization'] = 'Bearer ' + token;
+    }
+    return fetch(url, { ...options, headers });
 }
 
 document.addEventListener('DOMContentLoaded', () => {
     loadWaiterData();
     restoreGarsonSession();
+    if (getStaffToken()) {
+        initWaiterSocket();
+    }
 
-    // Socket.io Canlı Bağlantı
-    const socket = io({
-        auth: { token: getStaffToken() },
-        reconnection: true,
-        reconnectionAttempts: Infinity,
-        reconnectionDelay: 1000,
-        reconnectionDelayMax: 5000
-    });
-
-    socket.on('connect', () => {
-        updateWaiterSocketBadge(true);
-    });
-
-    socket.on('disconnect', () => {
-        updateWaiterSocketBadge(false);
-    });
-
-    // Müşteri QR Menüyü Açtığında (Masa Oturumu Başladı)
-    socket.on('garson_musteri_geldi', (data) => {
-        if (!data) return;
-        showWaiterToast(`👋 MÜŞTERİ GELDİ! ${data.masa_no} menüyü inceliyor.`);
-        const masaId = toPositiveInteger(data.masa_id);
-        if (masaId !== null) {
-            if (!activeBrowsingTables[masaId]) {
-                activeBrowsingTables[masaId] = { masa_no: data.masa_no, time: Date.now(), item_count: 0, last_item: '' };
-            }
-            renderWaiterDashboard();
-        }
-    });
-
-    // Müşteri Sepete Ürün Eklediğinde
-    socket.on('garson_musteri_urun_secti', (data) => {
-        if (!data) return;
-        const masaId = toPositiveInteger(data.masa_id);
-        if (masaId !== null) {
-            if (data.item_count > 0 && (!activeBrowsingTables[masaId] || activeBrowsingTables[masaId].item_count === 0)) {
-                showWaiterToast(`📖 MENÜ İNCELENİYOR! ${data.masa_no} sepete ürün ekledi (${data.last_item}).`);
-            }
-            activeBrowsingTables[masaId] = {
-                masa_no: data.masa_no,
-                time: Date.now(),
-                item_count: data.item_count,
-                last_item: data.last_item
-            };
-            renderWaiterDashboard();
-        }
-    });
-
-    // Mutfak "Hazır" Yaptığında
-    socket.on('durum_guncellendi', (data) => {
-        if (data.yeni_durum === 'hazir') {
-            playWaiterBellSound();
-            showWaiterToast(`🔔 TESLİMAT BEKLİYOR! ${data.masa_no} Yemeği Hazır!`);
-        }
-        loadWaiterData();
-    });
-
-    // Müşteri Nakit Ödeme Seçtiğinde
-    socket.on('nakit_odeme_talebi', (data) => {
-        playWaiterBellSound();
-        showWaiterToast(`💵 NAKİT ÖDEME TALEBİ! ${data.masa_no} - Tutar: ${data.toplam_tutar.toFixed(2)} ₺`);
-        loadWaiterData();
-    });
-
-    // Müşteri Yedikten Sonra Öde Seçtiğinde (Garson Onay Talebi)
-    socket.on('garson_onay_talebi', (data) => {
-        playWaiterBellSound();
-        showWaiterToast(`🛎️ MASAYA GİDİN! ${data.masa_no} - Sipariş Onayı Bekliyor!`);
-        loadWaiterData();
-    });
-
-    socket.on('nakit_odendi', () => loadWaiterData());
-    socket.on('yeni_siparis', () => loadWaiterData());
-    socket.on('masa_durumu_degisti', () => loadWaiterData());
-    socket.on('masa_tasindi', (data) => {
-        if (data && activeDetailMasaId && parseInt(activeDetailMasaId) === parseInt(data.from_masa_id)) {
-            activeDetailMasaId = parseInt(data.to_masa_id);
-        }
-        loadWaiterData();
-    });
-    socket.on('masa_temizlendi', (data) => {
-        if (data && data.masa_id) {
-            delete activeBrowsingTables[data.masa_id];
-        }
-        loadWaiterData();
-    });
-
-    // Klavye ile PIN Girme Desteği
     document.addEventListener('keydown', (e) => {
         const modal = document.getElementById('garsonPinModal');
         if (!modal || !modal.classList.contains('active')) return;
@@ -190,9 +259,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-// -------------------------------------------------------------
-// 6 HANELİ GARSON PIN YÖNETİMİ & NUMPAD LOGIC
-// -------------------------------------------------------------
 // -------------------------------------------------------------
 // 6 HANELİ GARSON PIN YÖNETİMİ & NUMPAD LOGIC (HER İŞLEMDE PIN SORULUR)
 // -------------------------------------------------------------
@@ -351,42 +417,12 @@ function updateWaiterSocketBadge(isConnected) {
     const badge = document.getElementById('socketStatusBadge');
     if (badge) {
         if (isConnected) {
-            badge.innerHTML = `🟢`;
+            badge.innerHTML = '🟢';
             badge.setAttribute('title', 'Canlı Bağlantı Aktif');
         } else {
-            badge.innerHTML = `🔴`;
+            badge.innerHTML = '🔴';
             badge.setAttribute('title', 'Bağlantı Kesildi');
         }
-    }
-}
-
-async function loadWaiterData() {
-    try {
-        const [ordersRes, tablesRes] = await Promise.all([
-            fetch('/api/siparisler'),
-            fetch('/api/masalar')
-        ]);
-
-        allRawOrders = await ordersRes.json();
-        tables = await tablesRes.json();
-
-        tables.forEach(t => {
-            if (t.secim_durumu) {
-                activeBrowsingTables[t.id] = t.secim_durumu;
-            }
-        });
-
-        waiterOrders = allRawOrders.filter(o => ['garson_onayi_bekliyor', 'nakit_bekliyor', 'odendi_mutfakta', 'garson_onayladi_mutfakta', 'hazirlaniyor', 'hazir'].includes(o.siparis_durumu));
-        renderWaiterDashboard();
-
-        if (activeDetailMasaId) {
-            const modal = document.getElementById('masaDetailModal');
-            if (modal && modal.classList.contains('active')) {
-                openMasaDetail(activeDetailMasaId);
-            }
-        }
-    } catch (e) {
-        console.error("Garson verileri yüklenemedi:", e);
     }
 }
 
@@ -781,7 +817,11 @@ window.deliverTableOrdersWithPin = function (masaId) {
 window.clearMasaWithPin = function (masaId) {
     requireGarsonPin(async (garson) => {
         const garsonName = garson ? garson.garson_adi : 'Garson';
-        if (!confirm(`Masa oturumu ${garsonName} yetkisiyle sonlandırılacaktır. Onaylıyor musunuz?`)) return;
+        const onaylandi = await appConfirm(
+            `Masa oturumu ${garsonName} yetkisiyle sonlandırılacaktır. Onaylıyor musunuz?`,
+            { title: '🧹 Masa Oturumunu Kapat', okText: 'Evet, sonlandır' }
+        );
+        if (!onaylandi) return;
         try {
             const res = await fetch(`/api/masalar/${masaId}/clear`, { method: 'POST' });
             if (res.ok) {
@@ -797,7 +837,11 @@ window.clearMasaWithPin = function (masaId) {
 window.clearMasaDirect = async function (masaId) {
     if (!activeGarson) return;
     const garsonName = activeGarson.garson_adi;
-    if (!confirm(`Masa oturumu ${garsonName} yetkisiyle sonlandırılacaktır. Onaylıyor musunuz?`)) return;
+    const onaylandi = await appConfirm(
+        `Masa oturumu ${garsonName} yetkisiyle sonlandırılacaktır. Onaylıyor musunuz?`,
+        { title: '🧹 Masa Oturumunu Kapat', okText: 'Evet, sonlandır' }
+    );
+    if (!onaylandi) return;
     try {
         const res = await fetch(`/api/masalar/${masaId}/clear`, { method: 'POST' });
         if (res.ok) {
@@ -812,7 +856,11 @@ window.clearMasaDirect = async function (masaId) {
 window.banDeviceWithPin = function (deviceId, masaId) {
     requireGarsonPin(async (garson) => {
         const garsonName = garson ? garson.garson_adi : 'Garson';
-        if (!confirm(`Bu cihazı kalıcı olarak yasaklamak istediğinize emin misiniz? (${garsonName})`)) return;
+        const onaylandi = await appConfirm(
+            `Bu cihaz kalıcı olarak yasaklanacaktır. (${garsonName}) Devam edilsin mi?`,
+            { title: '🚫 Cihazı Yasakla', okText: 'Evet, yasakla' }
+        );
+        if (!onaylandi) return;
         try {
             const res = await fetch(`/api/garson/ban-device`, {
                 method: 'POST',
@@ -836,7 +884,11 @@ window.banDeviceWithPin = function (deviceId, masaId) {
 window.banDeviceDirect = async function (deviceId, masaId) {
     if (!activeGarson) return;
     const garsonName = activeGarson.garson_adi;
-    if (!confirm(`Bu cihazı kalıcı olarak yasaklamak istediğinize emin misiniz? (${garsonName})`)) return;
+    const onaylandi = await appConfirm(
+        `Bu cihaz kalıcı olarak yasaklanacaktır. (${garsonName}) Devam edilsin mi?`,
+        { title: '🚫 Cihazı Yasakla', okText: 'Evet, yasakla' }
+    );
+    if (!onaylandi) return;
     try {
         const res = await fetch(`/api/garson/ban-device`, {
             method: 'POST',
