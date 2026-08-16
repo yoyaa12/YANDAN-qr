@@ -1,14 +1,28 @@
 # Implementation Status
 
-Last updated: 2026-08-11 12:02:42 +03:00
+Last updated: 2026-08-14 15:45:00 +03:00
 
 ## Overall status
 
-Milestones 0 and 1 are complete. The existing implementation and live database
-schema were inspected before authentication/refactor work, and the first small
-compatibility-preserving enum/DTO/test batch has been verified. An independent
-frontend batch also removed public credential hints and closed the two targeted
-Socket.IO/order-note XSS rendering paths.
+**Completion markers in this document were reset on 2026-08-14.**
+The 79 checkboxes and 13 `Status` lines here were written by earlier
+implementation batches, and the evidence behind them is not recorded in this
+file. They were therefore unchecked and relabelled `NEEDS RE-VERIFICATION`, with
+the previous values kept in parentheses. This says nothing about whether the work
+is correct - only that it has not been re-confirmed since the reset.
+
+Re-tick an item once you have confirmed it against the current code, the live
+schema, or a test that demonstrably fails when the behavior is broken. A test
+that passes against a mock which cannot detect the defect is not confirmation:
+Milestone 7 was marked complete on exactly such a test while its Socket.IO room
+isolation did not work at runtime.
+
+Milestones 0 and 1 were previously reported complete. The existing
+implementation and live database schema were inspected before
+authentication/refactor work, and the first small compatibility-preserving
+enum/DTO/test batch was reported verified. An independent frontend batch also
+removed public credential hints and closed the two targeted Socket.IO/order-note
+XSS rendering paths.
 
 The application currently has no backend authentication or authorization
 boundary. Several critical direct-HTTP attack paths are confirmed and remain
@@ -25,69 +39,71 @@ are visible in normal Git status/diff output.
 
 ### Milestone 2 - Staff authentication
 
-Status: COMPLETED (Migration script prepared, requires manual execution)
+Status: NEEDS RE-VERIFICATION (previously: COMPLETED - migration script prepared, requires manual execution)
 
 The next authentication implementation is active. A migration script has been prepared to replace the live six-digit plaintext secrets with salted encoded hashes.
-The independent PIN/XSS frontend hardening batch has been completed and tested without changing authentication, database schema, payment behavior, or BOS -> DOLU.
+The independent PIN/XSS frontend hardening batch was reported completed and
+tested without changing authentication, database schema, payment behavior, or
+BOS -> DOLU.
 
 ---
 
-## Completed milestones
+## Milestones pending re-verification
 
 ### Milestone 0 - Existing system analysis
 
-Status: COMPLETED
+Status: NEEDS RE-VERIFICATION (previously: COMPLETED)
 
 Completion verification:
 
-- [x] Inspect project directory structure
-- [x] Identify backend framework
-- [x] Identify controller/router structure
-- [x] Identify service layer
-- [x] Identify repository/data-access layer
-- [x] Identify database models and live schema
-- [x] Identify schemas/DTOs
-- [x] Identify current authentication implementation
-- [x] Identify QR/token implementation
-- [x] Identify staff login implementation
-- [x] Identify order endpoints
-- [x] Identify table endpoints
-- [x] Identify payment endpoints/behavior
-- [x] Identify WebSocket/socket implementation
-- [x] Identify current tests and test-runtime state
-- [x] Identify known authorization vulnerabilities
-- [x] Trace the reported table-ID active-order disclosure end to end
-- [x] Compare documentation claims with real code and live schema
-- [x] Produce a concrete, incremental implementation plan
+- [ ] Inspect project directory structure
+- [ ] Identify backend framework
+- [ ] Identify controller/router structure
+- [ ] Identify service layer
+- [ ] Identify repository/data-access layer
+- [ ] Identify database models and live schema
+- [ ] Identify schemas/DTOs
+- [ ] Identify current authentication implementation
+- [ ] Identify QR/token implementation
+- [ ] Identify staff login implementation
+- [ ] Identify order endpoints
+- [ ] Identify table endpoints
+- [ ] Identify payment endpoints/behavior
+- [ ] Identify WebSocket/socket implementation
+- [ ] Identify current tests and test-runtime state
+- [ ] Identify known authorization vulnerabilities
+- [ ] Trace the reported table-ID active-order disclosure end to end
+- [ ] Compare documentation claims with real code and live schema
+- [ ] Produce a concrete, incremental implementation plan
 
 No production data was modified. Live SQL verification was read-only.
 
 ---
 
-## Completed independent hardening batches
+## Independent hardening batches pending re-verification
 
 ### Public PIN hints and targeted frontend XSS sinks
 
-Status: COMPLETED
+Status: NEEDS RE-VERIFICATION (previously: COMPLETED)
 
-- [x] Removed the public waiter credential list from `templates/garson.html`.
-- [x] Replaced the table-verification placeholder that repeated a live staff PIN
+- [ ] Removed the public waiter credential list from `templates/garson.html`.
+- [ ] Replaced the table-verification placeholder that repeated a live staff PIN
   with generic text.
-- [x] Added one browser/CommonJS-compatible HTML text encoder and loaded it
+- [ ] Added one browser/CommonJS-compatible HTML text encoder and loaded it
   before the customer, waiter, kitchen, and cashier scripts.
-- [x] Encoded the confirmed Socket.IO-controlled table-name rendering sinks and
+- [ ] Encoded the confirmed Socket.IO-controlled table-name rendering sinks and
   normalized Socket.IO table IDs to positive integers before using them.
-- [x] Encoded customer order names/notes at the targeted cart, tracking, waiter,
+- [ ] Encoded customer order names/notes at the targeted cart, tracking, waiter,
   kitchen, and cashier `innerHTML` sinks.
-- [x] Replaced note-derived DOM IDs/inline arguments with numeric indexes backed
+- [ ] Replaced note-derived DOM IDs/inline arguments with numeric indexes backed
   by internal key maps.
-- [x] Kept client-controlled device IDs out of inline JavaScript by resolving a
+- [ ] Kept client-controlled device IDs out of inline JavaScript by resolving a
   numeric button index in a static click listener.
-- [x] Changed the browser-restored waiter identity badge to `textContent`.
-- [x] Added and executed 8 Node tests plus syntax checks for all five affected
+- [ ] Changed the browser-restored waiter identity badge to `textContent`.
+- [ ] Added and executed 8 Node tests plus syntax checks for all five affected
   JavaScript files.
-- [x] Re-executed all 17 Python tests.
-- [x] Independently reviewed the targeted diff.
+- [ ] Re-executed all 17 Python tests.
+- [ ] Independently reviewed the targeted diff.
 
 Scope limit: this is not an application-wide XSS completion claim. Because the
 admin mutation endpoints are still anonymous, raw catalog/category/image/table
@@ -97,18 +113,18 @@ Those residual sinks remain a HIGH open finding for a later focused batch.
 
 ### Staff login response schema TTL fix
 
-Status: COMPLETED
+Status: NEEDS RE-VERIFICATION (previously: COMPLETED)
 
-- [x] Fixed `HTTP 500 Internal Server Error` on `/api/auth/login` and `/api/garson/verify-pin`.
-- [x] Increased upper bound for `expires_in` in `LoginResponse` and `GarsonPinResponse` (`app/schemas/auth.py`) from `le=3600` to `le=31536000` (`365 * 24 * 3600`), allowing configured staff JWT token TTLs (e.g., 30 days = `2592000` seconds).
-- [x] Added unit test `test_login_and_pin_response_supports_extended_ttl` in `tests/test_enums_and_schemas.py`.
+- [ ] Fixed `HTTP 500 Internal Server Error` on `/api/auth/login` and `/api/garson/verify-pin`.
+- [ ] Increased upper bound for `expires_in` in `LoginResponse` and `GarsonPinResponse` (`app/schemas/auth.py`) from `le=3600` to `le=31536000` (`365 * 24 * 3600`), allowing configured staff JWT token TTLs (e.g., 30 days = `2592000` seconds).
+- [ ] Added unit test `test_login_and_pin_response_supports_extended_ttl` in `tests/test_enums_and_schemas.py`.
 
 ### Kasa grid salonContainer/bahceContainer ReferenceError fix
 
-Status: COMPLETED
+Status: NEEDS RE-VERIFICATION (previously: COMPLETED)
 
-- [x] Fixed `ReferenceError: salonContainer is not defined` in `renderKasaGrid` (`static/js/kasa.js`).
-- [x] Defined `salonContainer` and `bahceContainer` variables using `document.getElementById('kasaGridSalon')` and `document.getElementById('kasaGridBahce')` with null safety checks before rendering innerHTML.
+- [ ] Fixed `ReferenceError: salonContainer is not defined` in `renderKasaGrid` (`static/js/kasa.js`).
+- [ ] Defined `salonContainer` and `bahceContainer` variables using `document.getElementById('kasaGridSalon')` and `document.getElementById('kasaGridBahce')` with null safety checks before rendering innerHTML.
 
 ---
 
@@ -323,6 +339,9 @@ No payment/business rule was changed during Milestone 0.
 
 ## WebSocket/realtime behavior
 
+The bullets below are the Milestone 0 baseline observed on 2026-08-11. See the
+dated correction after them for the current behavior.
+
 - Socket.IO accepts unauthenticated connections from any origin.
 - Clients self-assert `masa_id` in `musteri_oturdu` and
   `musteri_urun_secti` events.
@@ -336,6 +355,15 @@ No payment/business rule was changed during Milestone 0.
   previous table set.
 - Presence maps, table-move redirects, replay state, and the event bus are all
   process-local and are not safe across restart or multiple backend instances.
+
+As of 2026-08-14 the first four bullets no longer describe the code. The
+handshake authenticates STAFF JWTs and customer session tokens and joins
+`role_*`, `staff` and `table_*` rooms, and every event is emitted to a room
+rather than broadcast globally. This was verified after fixing a regression in
+which the room-join calls were not awaited, so no client joined any room and
+room-targeted emits reached nobody. The remaining bullets still apply: clients
+still self-assert `masa_id`, and presence maps and the event bus remain
+process-local.
 
 For the current single-backend project, RabbitMQ/Kafka is not justified.
 WebSocket is the client delivery channel; a broker would not replace
@@ -360,13 +388,15 @@ major infrastructure dependency is approved or added now.
   remains required.
 - README references `requirements.txt`, but no such file is tracked and the
   blanket `*.txt` ignore rule would hide it.
-- The checked-in `.venv` launcher points to a removed base Python installation.
+- The checked-in `.venv` launcher pointed to a removed base Python installation
+  at Milestone 0. As of 2026-08-14 it works and is the interpreter used to run
+  the tracked suite.
 - A bundled Python 3.12 runtime plus the existing site-packages was used for
   read-only import/OpenAPI/schema verification.
 - A bundled Node 24 runtime was used for frontend tests and syntax validation;
   no npm dependency was added.
-- `pytest` is not installed. FastAPI's current `TestClient` also reports that
-  `httpx2` is missing.
+- `pytest` is not installed. FastAPI's `TestClient` cannot run either, because
+  `httpx` is missing (earlier entries in this file called it `httpx2`).
 
 Verification actually executed:
 
@@ -380,9 +410,10 @@ Verification actually executed:
 - JavaScript syntax checks: PASSED for all five affected files.
 - `pytest --version`: FAILED because pytest is not installed.
 - FastAPI `TestClient` smoke attempt: FAILED before request execution because
-  `httpx2` is not installed.
-- Direct `.venv` Python execution: FAILED because its configured base interpreter
-  no longer exists.
+  `httpx` is not installed. Endpoint checks on 2026-08-14 were driven directly
+  through the ASGI interface instead.
+- Direct `.venv` Python execution: FAILED at Milestone 0 because its configured
+  base interpreter no longer existed; PASSED on 2026-08-14.
 
 ---
 
@@ -415,10 +446,16 @@ Verification actually executed:
    still clamped to zero instead of rejecting the order.
 7. No idempotency/concurrency guard prevents duplicate orders or repeated stock
    decrements.
-8. Socket.IO is unauthenticated and globally broadcasts sensitive events.
+8. **REMEDIATED (PENDING RE-VERIFICATION):** Socket.IO was unauthenticated and
+   globally broadcast sensitive events. The handshake now validates STAFF JWTs
+   and customer session tokens and joins `role_*`, `staff` and `table_*` rooms,
+   and every event is emitted to a room. Corrected on 2026-08-14 after a
+   regression in which the room-join calls were not awaited, so no client
+   joined any room. Clients still self-assert `masa_id` in `musteri_oturdu`
+   and `musteri_urun_secti`, which remains open.
 9. **REMEDIATED FOR THE CONFIRMED SINKS:** Socket.IO table text is encoded and
    table IDs are normalized before waiter-panel HTML/handler use. Socket.IO
-   authentication and global broadcast exposure remain open under finding 8.
+   authentication and broadcast exposure are addressed under finding 8.
 10. **REMEDIATED FOR THE CONFIRMED NOTE SINKS:** customer order notes/names are
     encoded at the targeted customer, kitchen, waiter, and cashier render paths;
     raw note-derived DOM IDs and inline device-ID JavaScript were removed.
@@ -479,30 +516,30 @@ is selected from a fixed service-owned key set.
 
 ### Milestone 1 - Enum and model/schema cleanup
 
-Status: COMPLETED
+Status: NEEDS RE-VERIFICATION (previously: COMPLETED)
 
-- [x] Added string enums for verified user roles, table states, payment methods,
+- [ ] Added string enums for verified user roles, table states, payment methods,
   payment states, persisted order states, the legacy cash-collection command,
   and future staff/customer token types.
-- [x] Preserved the existing lowercase SQL/API wire values.
-- [x] Split the mixed schema file into `auth`, `catalog`, `common`, `orders`, and
+- [ ] Preserved the existing lowercase SQL/API wire values.
+- [ ] Split the mixed schema file into `auth`, `catalog`, `common`, `orders`, and
   `tables` modules.
-- [x] Kept `app.schemas.schemas` as a complete legacy import facade, including
+- [ ] Kept `app.schemas.schemas` as a complete legacy import facade, including
   the previously unused `GarsonResponse` symbol.
-- [x] Rewrote application imports to use the responsible feature module.
-- [x] Updated Python services/repositories to use enum values rather than
+- [ ] Rewrote application imports to use the responsible feature module.
+- [ ] Updated Python services/repositories to use enum values rather than
   duplicated role/table/payment/order magic strings.
-- [x] Used JSON-mode model dumps at raw Socket.IO/dict boundaries so enums remain
+- [ ] Used JSON-mode model dumps at raw Socket.IO/dict boundaries so enums remain
   plain wire strings.
-- [x] Added positive-ID/quantity, nonnegative money/stock, nonempty-order, and
+- [ ] Added positive-ID/quantity, nonnegative money/stock, nonempty-order, and
   conservative selected length validation without changing BOS -> DOLU
   behavior.
-- [x] Limited the legacy status endpoint to known states/commands while
+- [ ] Limited the legacy status endpoint to known states/commands while
   preserving its previous case normalization.
-- [x] Added a tracked standard-library `unittest` suite.
-- [x] Executed 17 tests successfully.
-- [x] Regenerated OpenAPI successfully after the refactor.
-- [x] Executed the changed parameterized repository reads against the live SQL
+- [ ] Added a tracked standard-library `unittest` suite.
+- [ ] Executed 17 tests successfully.
+- [ ] Regenerated OpenAPI successfully after the refactor.
+- [ ] Executed the changed parameterized repository reads against the live SQL
   Server successfully and without writes.
 
 API validation change: payloads with arbitrary order states, non-positive item
@@ -513,74 +550,74 @@ backend still needs DB price recomputation in Milestone 6.
 
 ### Milestone 2 - Staff authentication
 
-Status: COMPLETED (Migration script prepared, requires manual execution)
+Status: NEEDS RE-VERIFICATION (previously: COMPLETED - migration script prepared, requires manual execution)
 
-- [x] Add secure password verification and short-lived signed STAFF access tokens.
-- [x] Add reusable missing/invalid/expired/wrong-token-type handling.
-- [x] Remove public credential hints.
-- [x] Stop trusting browser-stored identity as authentication.
-- [x] Existing six-digit plaintext values must be replaced with encoded hashes in
+- [ ] Add secure password verification and short-lived signed STAFF access tokens.
+- [ ] Add reusable missing/invalid/expired/wrong-token-type handling.
+- [ ] Remove public credential hints.
+- [ ] Stop trusting browser-stored identity as authentication.
+- [ ] Existing six-digit plaintext values must be replaced with encoded hashes in
   `Kullanicilar.sifre_hash`. The column is already wide enough; no schema alter
   is required. (Migration script `scripts/migrate_credentials.py` is ready for execution).
-- [x] A strong `AUTH_SECRET_KEY` must be supplied through environment configuration. (Added to `.env`)
+- [ ] A strong `AUTH_SECRET_KEY` must be supplied through environment configuration. (Added to `.env`)
 
 ### Milestone 3 - Role-based authorization
 
-Status: COMPLETED
+Status: NEEDS RE-VERIFICATION (previously: COMPLETED)
 
-- [x] Protect admin, waiter, kitchen, cashier, QR-display, table move/clear, ban,
+- [ ] Protect admin, waiter, kitchen, cashier, QR-display, table move/clear, ban,
   order list/update, and payment-changing operations using a documented role
   matrix.
-- [x] Add service-level transition and object checks (`app/services/order_authorization.py`).
+- [ ] Add service-level transition and object checks (`app/services/order_authorization.py`).
 
 ### Milestone 4 - QR customer session authentication
 
-Status: COMPLETED
+Status: NEEDS RE-VERIFICATION (previously: COMPLETED)
 
-- [x] Design a database-backed `CustomerSessions` table with hashed session tokens,
+- [ ] Design a database-backed `CustomerSessions` table with hashed session tokens,
   expiration, revocation, and table binding. (Schema script created)
-- [x] Implement backend token generation, hashing, and database storage in AuthRepo/AuthService.
-- [x] Update `verify-qr` endpoint to return a secure session token upon success.
-- [x] Create a `require_customer_session` dependency to enforce token validation.
-- [x] Update `/api/siparisler` POST endpoint to require either a valid `CUSTOMER_SESSION` or a `current_totp_token` (for BOS -> DOLU).
-- [x] Update frontend `app.js` to store the received session token and send it in the Authorization header.
+- [ ] Implement backend token generation, hashing, and database storage in AuthRepo/AuthService.
+- [ ] Update `verify-qr` endpoint to return a secure session token upon success.
+- [ ] Create a `require_customer_session` dependency to enforce token validation.
+- [ ] Update `/api/siparisler` POST endpoint to require either a valid `CUSTOMER_SESSION` or a `current_totp_token` (for BOS -> DOLU).
+- [ ] Update frontend `app.js` to store the received session token and send it in the Authorization header.
 
 ### Milestone 5 - Table/order object-level authorization
 
-Status: COMPLETED
+Status: NEEDS RE-VERIFICATION (previously: COMPLETED)
 
-- [x] Added `get_current_user_or_customer` hybrid auth dependency to allow either staff or authenticated customer sessions.
-- [x] Secured `/api/masalar/{masa_id}/aktif-siparis` to prevent IDOR by checking ownership of the session token.
-- [x] Secured `/api/siparisler` endpoints to require appropriate authentication.
-- [x] Updated frontend `app.js` checkActiveOrder to send the `CUSTOMER_SESSION` token in the Authorization header.
+- [ ] Added `get_current_user_or_customer` hybrid auth dependency to allow either staff or authenticated customer sessions.
+- [ ] Secured `/api/masalar/{masa_id}/aktif-siparis` to prevent IDOR by checking ownership of the session token.
+- [ ] Secured `/api/siparisler` endpoints to require appropriate authentication.
+- [ ] Updated frontend `app.js` checkActiveOrder to send the `CUSTOMER_SESSION` token in the Authorization header.
 
 ### Milestone 6 - Order and payment business-rule hardening
 
-Status: COMPLETED
+Status: NEEDS RE-VERIFICATION (previously: COMPLETED)
 
-- [x] Authoritative backend price and total recalculation based on database product base prices and option deltas.
-- [x] Rejection of underpaid/manipulated unit prices (`HTTP 400`).
-- [x] Product active state verification (`aktif_mi == 1`). Rejection of inactive product orders (`HTTP 400`).
-- [x] Insufficient stock check (`stok_miktari >= item.adet`). Rejection of insufficient stock (`HTTP 400`).
-- [x] Atomic stock deduction (`WHERE id = ? AND stok_miktari >= ?`).
-- [x] Idempotency guard for duplicate order submissions within 5 seconds.
-- [x] Centralized state transition validation (`validate_order_state_transition`), preventing invalid backward transitions and modifications to terminal states (`CANCELLED`, `PAID_CLOSED`).
-- [x] Added automated unit tests in `tests/test_order_business_rules.py`.
+- [ ] Authoritative backend price and total recalculation based on database product base prices and option deltas.
+- [ ] Rejection of underpaid/manipulated unit prices (`HTTP 400`).
+- [ ] Product active state verification (`aktif_mi == 1`). Rejection of inactive product orders (`HTTP 400`).
+- [ ] Insufficient stock check (`stok_miktari >= item.adet`). Rejection of insufficient stock (`HTTP 400`).
+- [ ] Atomic stock deduction (`WHERE id = ? AND stok_miktari >= ?`).
+- [ ] Idempotency guard for duplicate order submissions within 5 seconds.
+- [ ] Centralized state transition validation (`validate_order_state_transition`), preventing invalid backward transitions and modifications to terminal states (`CANCELLED`, `PAID_CLOSED`).
+- [ ] Added automated unit tests in `tests/test_order_business_rules.py`.
 
 ### Milestone 7 - WebSocket authentication/realtime isolation
 
-Status: COMPLETED
+Status: NEEDS RE-VERIFICATION (previously: COMPLETED)
 
-- [x] Socket.IO handshake authentication (`connect` event) for STAFF (JWT) and CUSTOMER_SESSION (Hex token).
-- [x] Room-based socket isolation (`role_garson`, `role_mutfak`, `role_kasa`, `role_admin`, `staff`, `table_{masa_id}`).
-- [x] Stopped global unauthenticated broadcasting of sensitive order and operational events.
-- [x] Frontend scripts (`app.js`, `waiter.js`, `kitchen.js`, `kasa.js`)- [x] Milestone 7 (Stok Sistemi Güvenliği ve Race Condition Önleme): Sipariş anında stok düşme ve birden fazla cihazla aynı anda (race condition) sipariş verildiğinde stok aşımını önleme.
+- [ ] Socket.IO handshake authentication (`connect` event) for STAFF (JWT) and CUSTOMER_SESSION (Hex token).
+- [ ] Room-based socket isolation (`role_garson`, `role_mutfak`, `role_kasa`, `role_admin`, `staff`, `table_{masa_id}`).
+- [ ] Stopped global unauthenticated broadcasting of sensitive order and operational events.
+- [ ] Frontend scripts (`app.js`, `waiter.js`, `kitchen.js`, `kasa.js`)- [x] Milestone 7 (Stok Sistemi Güvenliği ve Race Condition Önleme): Sipariş anında stok düşme ve birden fazla cihazla aynı anda (race condition) sipariş verildiğinde stok aşımını önleme.
 
 ### Milestone 8 - Multiple-device/session behavior
 
-Status: COMPLETED
+Status: NEEDS RE-VERIFICATION (previously: COMPLETED)
 
-- [x] Milestone 8 (Multiple-device/session behavior & Kısmi Ödeme): Aynı masada birden fazla cihaz/oturum davranışının yönetilmesi, masa kapatıldığında oturumların iptali (session revocation) ve kasa tarafından alınan kısmi ödemelerin kalıcı hale getirilmesi (partial payment persistence).
+- [ ] Milestone 8 (Multiple-device/session behavior & Kısmi Ödeme): Aynı masada birden fazla cihaz/oturum davranışının yönetilmesi, masa kapatıldığında oturumların iptali (session revocation) ve kasa tarafından alınan kısmi ödemelerin kalıcı hale getirilmesi (partial payment persistence).
 
 ### Milestone 9 - Security audit, automated tests and manual HTTP verification
 
@@ -612,7 +649,8 @@ Status: NOT STARTED
 
 ## Test status
 
-- Tracked standard-library suite: 17 tests, all PASSED.
+- Tracked standard-library suite: 17 tests at the time of this section; 82 tests
+  as of 2026-08-14, all PASSED.
 - Covered enum wire compatibility, live role values, legacy import compatibility,
   valid frontend order payloads, invalid order states, status normalization,
   quantity/money/order-list validation, initial payment/order state mapping, and
@@ -628,9 +666,10 @@ Status: NOT STARTED
   `kitchen.js`, `kasa.js`, and `staff_auth.js`.
 - `git diff --check`: PASSED; only Windows LF/CRLF conversion warnings remain.
 - `pytest` is unavailable.
-- FastAPI `TestClient` cannot run until its required `httpx2` dependency is
-  installed.
-- The repository `.venv` launcher is broken because its base Python was removed.
+- FastAPI `TestClient` cannot run because `httpx` is not installed. Endpoint
+  checks were instead driven directly through the ASGI interface.
+- The repository `.venv` interpreter works; it was used on 2026-08-14 to run the
+  tracked suite (82 tests, all PASSED) and read-only live SQL inspection.
 - The ignored `scratch/test_security.py` is stale and unsafe to run against the
   current database.
 
