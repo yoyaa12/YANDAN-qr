@@ -1450,3 +1450,537 @@ contract tests.
 
 - Decide on persistence for table-move and replay state (schema change).
 - Decide whether option pricing moves into the product catalogue.
+
+---
+
+### 2026-08-17 - Independent milestone re-verification, architecture documentation and two new test suites
+
+#### Summary
+
+Worked through the 2026-08-14 marker reset. Every milestone was re-checked
+against the current code, the live database and executed tests, and the results
+were written back into `docs/IMPLEMENTATION_STATUS.md` with the evidence that
+backs each verdict. Two verification gaps were closed with new test suites, and
+mutation testing was used to prove the new tests actually fail when the guard
+under test is removed. No application source file was modified in this batch.
+
+#### Files created
+
+- `docs/PROJE_MIMARI_SUNUM.md`
+  - Presentation-grade architecture document (Turkish): technology choices with
+    their rationale and rejected alternatives, layer diagram, ER diagram, order
+    state machine, staff-JWT and customer-session flows, the BOS -> DOLU
+    anti-troll rule, the role/endpoint matrix, the Socket.IO room model, the
+    RabbitMQ/Kafka analysis, the test strategy, known limits and a demo script.
+    First deliverable of Milestone 10.
+- `tests/test_first_order_physical_verification.py`
+  - 18 tests. First coverage of `SiparisService.create_siparis` and of
+    `app/core/totp_service.py`, which previously had none at all: token shape,
+    +/-2 window tolerance accepted and +/-3 rejected, replay consumption,
+    per-table token isolation, the BOS -> DOLU code requirement, the DOLU
+    "friend joins" path, banned devices, missing table, the idempotency window
+    and server-side repricing on create.
+- `tests/test_customer_session_authorization.py`
+  - 6 tests driving the real ASGI application for
+    `GET /api/masalar/{id}/aktif-siparis` and `POST /api/siparisler`: no token
+    -> 401, unknown token -> 401, own table -> 200, another table -> 403, and
+    the order service is asserted never to run for a rejected request.
+
+#### Files modified
+
+- `docs/IMPLEMENTATION_STATUS.md`
+  - Re-ticked 88 checkboxes that were confirmed today; left 6 unchecked
+    deliberately.
+  - Replaced all 14 `Status:` lines with dated verdicts carrying their evidence
+    (VERIFIED / PARTIAL / IN PROGRESS).
+  - Added a `2026-08-17 - Independent re-verification pass` block to
+    `Overall status` listing the executed commands and their results.
+  - Marked the `Endpoint security inventory` and the Staff half of
+    `Current authentication and authorization mechanisms` as superseded
+    2026-08-11 snapshots and documented the current behaviour next to them,
+    rather than deleting the historical text.
+  - Added a `2026-08-17` findings section, recorded the six 2026-08-11 CRITICAL
+    findings as closed, and refreshed `Test status`, `Blockers` and
+    `Exact next action`.
+  - Repaired the corrupted Milestone 7 bullet, which had a stock/race-condition
+    fragment glued onto the frontend Socket.IO line.
+- `docs/CHANGELOG.md`
+  - This entry.
+
+#### Files deleted
+
+- None.
+
+#### Database / migrations
+
+- No write of any kind. Live inspection was read-only `SELECT`/
+  `INFORMATION_SCHEMA` only, and confirmed: 9 base tables including
+  `CustomerSessions` and `MasaTahsilatlari`; all 8 `Kullanicilar.sifre_hash`
+  values are `pbkdf2_sha256$...` (87 chars), so the Milestone 2 credential
+  migration has been executed; `Siparisler` still has no `odeme_yontemi`
+  column; there are no CHECK constraints.
+
+#### API changes
+
+- None.
+
+#### Authentication / authorization changes
+
+- None. The existing guards were audited, not altered. Route audit through the
+  real application object: 34 operations, 22 publishing a `StaffBearer`
+  requirement; the open ones are the HTML pages, `/api/kategoriler`,
+  `/api/urunler`, `/api/auth/login`, `/api/garson/verify-pin` and
+  `/api/masalar/{id}/verify-qr`.
+
+#### Tests added or modified
+
+- 24 new Python tests (125 -> 149) across the two new files. No existing test
+  was modified.
+
+#### Tests executed
+
+- `python -m unittest discover -s tests` (repository `.venv` interpreter).
+- `node --test "tests/frontend/**/*.test.cjs"`.
+- Mutation runs: ownership check removed from
+  `app/api/v1/endpoints/masalar.py`; ownership check removed from
+  `app/api/v1/endpoints/siparisler.py`; the `TableStatus.EMPTY` branch disabled
+  in `SiparisService.create_siparis`. Each source file was restored immediately
+  afterwards and `git diff` was confirmed empty.
+- Read-only live SQL inspection and an OpenAPI/route security audit.
+
+#### Test results
+
+- Python suite: 149/149 PASSED.
+- Frontend Node suite: 27/27 PASSED.
+- Mutation 1 (active-order ownership removed): new suite FAILED with
+  `AssertionError: 200 != 403`, as required. `test_milestone9_security_audit`
+  stayed green during the same mutation.
+- Mutation 2 (order-creation ownership removed): new suite FAILED with
+  `create_siparis must not run for a rejected request`.
+- Mutation 3 (BOS -> DOLU branch disabled): 4 tests FAILED with
+  `HTTPException not raised`.
+- Post-restore full suite: 149/149 PASSED, `git diff` empty.
+
+#### Verification performed
+
+- Read every router, service, repository, auth module, socket module and DTO
+  module, plus the customer/staff frontend auth paths.
+- Confirmed the live credential migration, the customer-session table and the
+  partial-payment table.
+- Confirmed the role matrix in `order_authorization.py` and the per-route role
+  guards, and confirmed the fail-closed behaviour of the state machine.
+- Confirmed staff panels pass their token in the Socket.IO handshake.
+
+#### Security impact
+
+- No behaviour changed. Two previously unverified security guarantees (the
+  table-ownership checks and the BOS -> DOLU physical-presence rule) now have
+  tests that demonstrably fail when the guard is removed.
+- New findings recorded: HIGH stock oversell on a lost race; MEDIUM missing
+  catalog length limits; LOW `masa=99` client bypass; LOW QR limiter reset on
+  success; INFO CHANGELOG drift; INFO two tautological tests.
+
+#### Architectural decisions
+
+- Historical sections of `IMPLEMENTATION_STATUS.md` are marked superseded with
+  the current behaviour written alongside, rather than rewritten, so the audit
+  trail from 2026-08-11 stays readable (AGENTS.md §3, §5).
+- A milestone is only re-ticked when a test fails after the corresponding guard
+  is removed. Passing tests alone are not treated as evidence, following the
+  Milestone 7 room-isolation precedent.
+
+#### Known issues / unfinished work
+
+- The stock oversell fix, catalog length limits, the two tautological tests, the
+  missing Milestone 8 tests, application-wide XSS regression and manual
+  direct-HTTP verification all remain open. See `Exact next action`.
+
+#### Next action
+
+- Obtain a decision on the stock oversell fix (customer-visible behaviour
+  change), then work through `Exact next action` items 2-5 in
+  `docs/IMPLEMENTATION_STATUS.md`.
+
+---
+
+### 2026-08-17 - Stock oversell fix on the atomic decrement (user approved)
+
+#### Summary
+
+Closed the HIGH finding raised earlier the same day. The conditional stock
+`UPDATE` could match zero rows without anyone noticing, so an order that lost
+the race was still created and confirmed to the customer while stock was never
+reduced. The affected row count is now checked and a lost race aborts the
+transaction with `HTTP 409`. The user explicitly approved this
+customer-visible behaviour change.
+
+#### Files created
+
+- `tests/test_stock_oversell_guard.py`
+  - 11 tests: repository contract (conditional query, row count returned,
+    `execute_non_query` not used), `db_transaction` rollback/commit behaviour,
+    a lost race on the create path, a lost race on the edit path, the rejected
+    attempt not being cached as a duplicate, and an unknown row count (-1)
+    not rejecting a valid order.
+
+#### Files modified
+
+- `app/database.py`
+  - Added `execute_update(query, params)` returning `cursor.rowcount`, and the
+    matching `DatabaseSession.execute_update`. `execute_non_query` cannot be
+    used for this: it runs `SELECT SCOPE_IDENTITY()` immediately after the
+    statement, which discards `rowcount`. A driver that cannot report the count
+    returns `-1`, documented as "unknown" rather than "zero rows".
+- `app/repositories/urun_repo.py`
+  - `update_stock` now routes through `execute_update` and returns the affected
+    row count instead of `None`.
+- `app/services/siparis_service.py`
+  - Added `_deduct_stock_or_fail(urun_id, adet, urun_adi)`, which raises
+    `HTTP 409` when the decrement matches zero rows. Because the call sits
+    inside `db_transaction()`, the raise rolls the order row back with it.
+  - `_persist_order_items` (create path) and the net-difference loop in
+    `update_siparis_items` (staff edit path) both go through it. `restore_stock`
+    is unconditional and needs no check.
+
+#### Files deleted
+
+- None.
+
+#### Database / migrations
+
+- No schema change and no data change. `cursor.rowcount` semantics were measured
+  against the live database inside a transaction that was rolled back:
+  a matching `UPDATE` reported 1, an impossible one 0, and a missing row 0;
+  the probe row's `stok_miktari` was unchanged afterwards (93 -> 93).
+
+#### API changes
+
+- `POST /api/siparisler` and `PUT /api/siparisler/{id}` may now return
+  `409 Conflict` with the detail
+  `'<ürün>' stoğu az önce tükendi, siparişiniz alınamadı. ...` when a
+  concurrent order consumes the remaining stock between the availability check
+  and the write. Previously such a request returned 200 and silently oversold.
+- Both panels already surface `detail` on a non-OK response
+  (`static/js/app.js` order submit, `static/js/waiter.js` order edit), and the
+  customer cart is only cleared on `res.ok`, so a rejected order keeps its cart.
+
+#### Authentication / authorization changes
+
+- None.
+
+#### Tests added or modified
+
+- 11 new Python tests (149 -> 160). No existing test was modified; the existing
+  suites use `MagicMock` repositories whose `update_stock` return value is not
+  `0`, so the new guard leaves them unaffected.
+
+#### Tests executed
+
+- `python -m unittest discover -s tests`.
+- `node --test "tests/frontend/**/*.test.cjs"`.
+- Mutation run: the `affected == 0` condition in `_deduct_stock_or_fail`
+  replaced with `if False`. Source restored afterwards.
+- Live `cursor.rowcount` probe inside a rolled-back transaction.
+
+#### Test results
+
+- Python suite: 160/160 PASSED.
+- Frontend Node suite: 27/27 PASSED.
+- Mutation run: 3 tests FAILED with `HTTPException not raised`, confirming the
+  new tests detect the defect they were written for.
+- Post-restore full suite: 160/160 PASSED.
+
+#### Verification performed
+
+- Confirmed the raise happens inside `db_transaction()` on both paths, and
+  proved the wrapper rolls back on a raised exception with a fake connection.
+- Confirmed `staff_auth.js` wraps `window.fetch` and injects the bearer token,
+  so the waiter edit path reaches the server and its error branch renders the
+  409 detail.
+- Confirmed the idempotency cache is written only after a successful commit, so
+  a rejected attempt can be retried immediately once stock returns.
+
+#### Security impact
+
+- Closes 2026-08-17 finding 1 (HIGH). Overselling is no longer possible through
+  the concurrent-order path; the customer is told the item ran out instead of
+  receiving a confirmation for stock that does not exist.
+
+#### Architectural decisions
+
+- The repository reports the row count and the service decides the HTTP
+  outcome, keeping `HTTPException` out of the repository layer as elsewhere in
+  this codebase.
+- An unreportable row count degrades to the previous behaviour rather than
+  failing closed, so swapping to `pymssql` cannot start rejecting valid orders.
+
+#### Known issues / unfinished work
+
+- Findings 2-6 from 2026-08-17 remain open; see `Exact next action`.
+
+#### Next action
+
+- Add `max_length` to the catalog request models (finding 2), then continue with
+  the remaining `Exact next action` items.
+
+---
+
+### 2026-08-17 - Table check boundary, sliding customer-session expiry, 401 recovery, tautological tests removed
+
+#### Summary
+
+Closed the gap between the two routes a table takes to `bos`. Only the cashier
+route closed the check; the automatic route left the previous party's customer
+sessions alive and their delivered orders "active", so a guest who had left
+could push orders onto the next party's bill, and the next party saw the
+previous party's items. Both routes now run one shared closing routine.
+
+Customer sessions became a sliding window so a guest who is still seated never
+loses their session mid-meal while a guest who has left stops being renewed.
+The customer app now recovers from a revoked session by exchanging the table's
+6-digit code for a fresh session and retrying the order. The two tautological
+Milestone 9 scenarios were removed.
+
+#### Files created
+
+- `tests/test_table_session_boundary.py`
+  - 13 tests. Both closing routes assert the same four effects; a table with
+    work left or an unpaid order must not close; cash collection closes the
+    check; table-move redirects are dropped. Sliding expiry: a stale session is
+    pushed back to the full lifetime, a fresh one is not rewritten, the refresh
+    threshold is pinned, a revoked session is never renewed, a non-datetime
+    expiry is tolerated, an empty token never reaches the database.
+- `tests/frontend/customer_session_recovery.test.cjs`
+  - 7 tests pinning the recovery contract: 401 opens the code screen, the code
+    is exchanged for a session *before* the order is retried, a failed code
+    does not retry, the refreshed token is stored and rebound to the socket, a
+    dead token is dropped from storage, and the asset version is bumped.
+
+#### Files modified
+
+- `app/services/siparis_service.py`
+  - Added `_close_masa_session(masa_id)`: closes out the orders, closes the
+    collections, revokes every customer session for the table, clears the
+    browsing entry and drops the table-move redirects. Documents why the
+    `bos` transition is the check boundary in a system with no check entity.
+  - `clear_masa` now delegates to it, and the automatic-emptying branch of
+    `update_siparis_durumu` calls it too. Previously that branch only set the
+    table status and cleared the browsing entry.
+- `app/repositories/auth_repo.py`
+  - Added `touch_customer_session(session_token_hash, expires_at)`.
+- `app/services/auth_service.py`
+  - Added `CUSTOMER_SESSION_TTL_MINUTES = 90` (unchanged value, previously a
+    literal) and `_SESSION_REFRESH_AFTER_MINUTES = 15`.
+  - `verify_customer_session` now calls `_extend_session_if_stale`, which
+    pushes `expires_at` back to a full lifetime once the session is more than
+    15 minutes old. A non-`datetime` expiry is skipped rather than crashing.
+- `static/js/app.js`
+  - `executeOrderSubmit` treats `401` like the existing "6 haneli" `403`: both
+    open the security-code screen. A revoked session previously surfaced as a
+    generic error toast with no way forward.
+  - Added `refreshCustomerSession(code)`: posts the code to
+    `/api/masalar/{id}/verify-qr`, stores the returned session token and
+    rebinds the Socket.IO connection. Required because the order endpoint
+    rejects a revoked session at the dependency layer, before the TOTP check.
+  - `submitFirstOrderPIN` is now async and refreshes the session before
+    retrying; an unverified code stops the flow and keeps the modal open.
+  - `checkActiveOrder` removes the stored token on 401.
+- `templates/menu.html`
+  - `app.js?v=83` becomes `?v=84`.
+- `tests/test_milestone9_security_audit.py`
+  - Removed scenarios 8 and 15 and replaced them with comments pointing at
+    `tests/test_customer_session_authorization.py`. Both raised the expected
+    `HTTPException` themselves inside `assertRaises`, so they passed with the
+    ownership checks deleted. Dropped the imports they alone used.
+
+#### Files deleted
+
+- None.
+
+#### Database / migrations
+
+- No schema change. One new write path: `UPDATE CustomerSessions SET
+  expires_at = ?` on a session older than 15 minutes.
+
+#### API changes
+
+- No route, request or response shape changed. Behavioural change:
+  `POST /api/siparisler` and `GET /api/masalar/{id}/aktif-siparis` now return
+  `401` for a session belonging to a check that has since closed. Previously
+  such a session stayed usable for the rest of its 90-minute lifetime.
+
+#### Authentication / authorization changes
+
+- Customer sessions are now bound to the life of the table's check, not to a
+  fixed clock. Closing a check - by either route - revokes them all.
+- Session lifetime is a sliding 90-minute window refreshed on use.
+
+#### Tests added or modified
+
+- 20 new tests (Python 160 -> 171, frontend 27 -> 34). Two tautological tests
+  removed.
+
+#### Tests executed
+
+- `python -m unittest discover -s tests`.
+- `node --test "tests/frontend/**/*.test.cjs"` and `node --check static/js/app.js`.
+- Mutation runs: the automatic-emptying branch reverted to
+  `clear_browsing_table` only; the `res.status === 401` condition in
+  `executeOrderSubmit` replaced with `false`. Both restored afterwards.
+
+#### Test results
+
+- Python suite: 171/171 PASSED.
+- Frontend suite: 34/34 PASSED; `node --check` PASSED.
+- Mutation 1 (auto-empty skips the closing routine): 4 tests FAILED with
+  `Expected 'revoke_all_sessions_for_masa' to be called once. Called 0 times.`
+- Mutation 2 (401 branch removed from the client): 1 frontend test FAILED.
+
+#### Verification performed
+
+- Confirmed the waiter and kitchen panels only branch on `yeni_durum === 'hazir'`
+  and otherwise re-fetch, so closing the just-delivered order out inside the
+  same transaction does not disturb them.
+- Confirmed `verify-qr` validates the code with `mark_as_used=False`, so the
+  same code still works for the retried `create_siparis`, which consumes it.
+- Confirmed the device shortcut in `verify_dynamic_qr_with_device` cannot fire
+  after a check closes: the orders are `odendi_kapatildi` and therefore no
+  longer active, so the code is genuinely required for the next party.
+
+#### Security impact
+
+- Closes the stale-session hole: a guest who has left can no longer order onto
+  the next party's bill once the table's check has closed, on either route.
+- The next party no longer sees the previous party's delivered orders as active
+  (this also closes the standing MEDIUM finding about delivered orders being
+  returned as active).
+- Residual, unchanged: revoking a session in the database does not disconnect a
+  Socket.IO connection that already joined `table_{id}` during its handshake.
+  Room membership is in-process and outlives the revocation until the client
+  disconnects. Recorded as a new finding.
+
+#### Architectural decisions
+
+- The check boundary stays implicit - the table's `bos` transition - rather
+  than introducing a `MasaOturumlari` table. A real check entity is the correct
+  model and is recorded as future work, but a schema change before the demo was
+  judged not worth the risk, and the implicit boundary is now enforced
+  identically everywhere.
+- Automatic emptying was kept rather than requiring staff to close every table.
+  At a busy service staff cannot close tables promptly, and a table left open
+  would attach the next party to the previous party's bill - the exact outcome
+  this batch set out to prevent.
+- Session refresh is throttled to once per 15 minutes so authentication does
+  not issue a write per request.
+
+#### Known issues / unfinished work
+
+- A guest who leaves mid-check keeps a usable session until the check closes.
+  Bounded by the sliding window and accepted as residual risk.
+- Socket.IO room membership survives session revocation (see Security impact).
+- Findings 2-5 from the earlier 2026-08-17 entry remain open.
+
+#### Next action
+
+- Add `max_length` to the catalog request models (finding 2).
+
+---
+
+### 2026-08-17 - Catalog request limits aligned with the live column widths
+
+#### Summary
+
+Closed 2026-08-17 finding 2, the last open sub-item of Milestone 1. Catalog
+request models declared no maximum length or upper bound, so an over-long
+product name, description or image URL reached SQL Server and failed there:
+the caller received an HTTP 500 and the server logged a database error for what
+is really a malformed request. The limits now come from the live schema.
+
+#### Files created
+
+- `tests/test_catalog_validation.py`
+  - 13 tests. Boundary cases at exactly the column width and one character past
+    it, the same limits on the update model, the decimal(10,2) and int ceilings,
+    negative values still rejected, the longest values currently in the live
+    catalogue still accepted, and optional fields still omittable. One test
+    pins the constants to the recorded schema so a column change surfaces here.
+
+#### Files modified
+
+- `app/schemas/catalog.py`
+  - Added named constants derived from the live schema, read read-only on
+    2026-08-17: `URUN_ADI_MAX = 100`, `ACIKLAMA_MAX = 500`,
+    `GORSEL_URL_MAX = 255`, `KATEGORI_ADI_MAX = 50`,
+    `PARA_MAX = 99_999_999.99` (decimal(10,2)), `STOK_MAX = 2_147_483_647` (int).
+  - `UrunEkleModel`, `UrunGuncelleModel` and `KategoriEkleModel` now carry
+    `max_length` on every text field and `le=` on price and stock.
+
+#### Files deleted
+
+- None.
+
+#### Database / migrations
+
+- No change. Column widths were read read-only from `INFORMATION_SCHEMA`:
+  `Urunler.urun_adi nvarchar(100)`, `Urunler.aciklama nvarchar(500)`,
+  `Urunler.gorsel_url nvarchar(255)`, `Kategoriler.kategori_adi nvarchar(50)`,
+  all money columns `decimal(10,2)`, `stok_miktari int`. The longest values in
+  the live catalogue are 30 / 74 / 53 / 12 characters, so nothing existing is
+  affected.
+
+#### API changes
+
+- `POST /api/admin/urunler`, `PUT /api/admin/urunler/{id}` and
+  `POST /api/admin/kategoriler` now return `422` instead of `500` for values
+  that exceed a column. No valid request changes behaviour.
+
+#### Authentication / authorization changes
+
+- None.
+
+#### Tests added or modified
+
+- 13 new Python tests (171 -> 184).
+
+#### Tests executed
+
+- `python -m unittest discover -s tests`.
+- Mutation run: `max_length` removed from `UrunEkleModel.urun_adi`; restored
+  afterwards.
+
+#### Test results
+
+- Python suite: 184/184 PASSED.
+- Mutation run: 1 test FAILED, confirming the boundary test detects a missing
+  limit.
+
+#### Verification performed
+
+- Compared every catalog field against its live column, including the numeric
+  precision, rather than picking round numbers.
+- Confirmed `UrunGuncelleModel` covers exactly the fields `UrunService.update_urun`
+  forwards (`urun_adi`, `fiyat`, `aciklama`, `stok_miktari`), so no field was
+  bounded that the service cannot write and none was left unbounded.
+
+#### Security impact
+
+- Removes an unauthenticated-to-500 path for admin-authenticated callers and
+  bounds the image URL that is rendered into `src` attributes. Low severity:
+  these routes already require an admin role.
+
+#### Architectural decisions
+
+- Limits are named constants pinned by a test rather than inline literals, so
+  the reason for each number (the column it mirrors) stays visible and a schema
+  change fails loudly instead of silently drifting.
+
+#### Known issues / unfinished work
+
+- `SiparisItemModel.adet` is still unbounded above (`gt=0` only). A very large
+  quantity would overflow the `decimal(10,2)` line total and produce a 500 for
+  a product with enough stock. Capping it is a business-rule decision under
+  AGENTS.md §3 and is recorded as a finding rather than applied.
+
+#### Next action
+
+- Add a `MasaTahsilatlari` persistence/summing test across a table close.

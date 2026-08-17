@@ -56,6 +56,15 @@ class AuthRepository:
         """
         return self.db.execute_query(query, (session_token_hash,), fetch_one=True)
 
+    def touch_customer_session(self, session_token_hash: str, expires_at):
+        """Kayan oturum ömrü: kullanılan oturumun bitiş zamanını ileri atar."""
+        query = """
+            UPDATE CustomerSessions
+            SET expires_at = ?
+            WHERE session_token_hash = ? AND is_active = 1
+        """
+        self.db.execute_non_query(query, (expires_at, session_token_hash))
+
     def revoke_customer_session(self, session_token_hash: str):
         query = "UPDATE CustomerSessions SET is_active = 0 WHERE session_token_hash = ?"
         self.db.execute_non_query(query, (session_token_hash,))

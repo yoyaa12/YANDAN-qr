@@ -198,6 +198,29 @@ class SiparisService:
                     detail=f"'{line['urun_adi']}' için yetersiz stok! (Mevcut stok: {available}, İstenen: {requested})"
                 )
 
+    def _deduct_stock_or_fail(self, urun_id: int, adet: int, urun_adi: str) -> None:
+        """Take quantities out of stock, or abort the whole transaction.
+
+        `_assert_stock_available` reads stock before the write, and under READ
+        COMMITTED that value can be stale: two devices ordering the last unit
+        both pass the pre-check. The atomic
+        `WHERE id = ? AND stok_miktari >= ?` update then decrements for the
+        first one and matches zero rows for the second. Without this check the
+        loser's order was still created and confirmed to the customer while
+        stock was never reduced - a silent oversell. Raising here rolls back the
+        surrounding `db_transaction()`, so the order row goes with it.
+
+        A driver that cannot report the row count returns -1; that is treated as
+        "unknown" rather than "no rows", so an unsupported driver degrades to the
+        previous behaviour instead of rejecting valid orders.
+        """
+        affected = self.urun_repo.update_stock(urun_id, adet)
+        if affected == 0:
+            raise HTTPException(
+                status_code=409,
+                detail=f"'{urun_adi}' stoğu az önce tükendi, siparişiniz alınamadı. Lütfen sepetinizi güncelleyip tekrar deneyin.",
+            )
+
     def _persist_order_items(self, siparis_id: int, priced: List[dict]) -> List[dict]:
         """Write the priced lines and take their quantities out of stock."""
         detaylar = []
@@ -210,7 +233,7 @@ class SiparisService:
                 line["urun_notu"],
                 line["ara_toplam"],
             )
-            self.urun_repo.update_stock(line["urun_id"], line["adet"])
+            self._deduct_stock_or_fail(line["urun_id"], line["adet"], line["urun_adi"])
             detaylar.append({k: v for k, v in line.items() if not k.startswith("_")})
         return detaylar
 
@@ -409,8 +432,10 @@ class SiparisService:
                 aktif_sayi = self.siparis_repo.get_active_count_for_masa(s_info['masa_id'])
                 unpaid_sayi = self.siparis_repo.get_unpaid_count_for_masa(s_info['masa_id'])
                 if aktif_sayi == 0 and unpaid_sayi == 0:
+                    # Masa kendiliğinden boşalıyor: bu da bir adisyon kapanışıdır
+                    # ve kasadan "Masayı Temizle" ile aynı sonucu doğurmalıdır.
                     self.masa_repo.update_durum(s_info['masa_id'], TableStatus.EMPTY.value)
-                    clear_browsing_table(s_info['masa_id'])
+                    self._close_masa_session(s_info['masa_id'])
                     masa_bosaldi = True
 
             updated_order = self.siparis_repo.get_by_id(siparis_id)
@@ -450,18 +475,36 @@ class SiparisService:
         await event_bus.publish("durum_guncellendi", payload_dict)
         return event_payload
 
+    def _close_masa_session(self, masa_id: int) -> None:
+        """Masanın adisyonunu kapatır: siparişler, tahsilatlar, oturumlar, presence.
+
+        Bu, iki müşteri grubu arasındaki sınırdır. Projede ayrı bir "adisyon"
+        varlığı yok; masanın `bos` durumuna döndüğü an bir grubun hesabını
+        diğerinden ayıran tek olay. Bu yüzden `bos` durumuna giden iki yolun da
+        -- kasanın masayı temizlemesi ve her şey teslim edilip ödendiğinde
+        masanın kendiliğinden boşalması -- birebir aynı işi yapması gerekir.
+
+        Önceden yalnızca kasa yolu oturumları iptal edip siparişleri kapatıyordu.
+        Kendiliğinden boşalmada önceki müşterinin oturumu ömrü bitene kadar
+        geçerli kalıyor, teslim edilmiş siparişleri de masaya sonradan oturan
+        gruba "aktif" olarak dönüyordu.
+
+        Çağıran zaten `db_transaction()` içinde olmalıdır.
+        """
+        self.siparis_repo.clear_active_orders_for_masa(masa_id)
+        self.siparis_repo.close_tahsilatlar_for_masa(masa_id)
+        self.auth_repo.revoke_all_sessions_for_masa(masa_id)
+        clear_browsing_table(masa_id)
+        TABLE_MOVES_MAP.pop(masa_id, None)
+        for k, v in list(TABLE_MOVES_MAP.items()):
+            if v == masa_id:
+                TABLE_MOVES_MAP.pop(k, None)
+
     async def clear_masa(self, masa_id: int):
         with db_transaction():
             self.masa_repo.update_durum(masa_id, TableStatus.EMPTY.value)
-            self.siparis_repo.clear_active_orders_for_masa(masa_id)
-            self.siparis_repo.close_tahsilatlar_for_masa(masa_id)
-            self.auth_repo.revoke_all_sessions_for_masa(masa_id)
-            clear_browsing_table(masa_id)
-            TABLE_MOVES_MAP.pop(masa_id, None)
-            for k, v in list(TABLE_MOVES_MAP.items()):
-                if v == masa_id:
-                    TABLE_MOVES_MAP.pop(k, None)
-        
+            self._close_masa_session(masa_id)
+
         event_payload = {"masa_id": masa_id, "durum": TableStatus.EMPTY.value}
         await event_bus.publish("masa_durumu_degisti", event_payload)
         await event_bus.publish("masa_temizlendi", {"masa_id": masa_id})
@@ -513,12 +556,16 @@ class SiparisService:
 
             # Stok yalnızca net fark kadar hareket eder.
             requested: dict = {}
+            names: dict = {}
             for line in priced_items:
                 requested[line["urun_id"]] = requested.get(line["urun_id"], 0) + line["adet"]
+                names.setdefault(line["urun_id"], line["urun_adi"])
             for urun_id in set(already_reserved) | set(requested):
                 delta = requested.get(urun_id, 0) - already_reserved.get(urun_id, 0)
                 if delta > 0:
-                    self.urun_repo.update_stock(urun_id, delta)
+                    self._deduct_stock_or_fail(
+                        urun_id, delta, names.get(urun_id, f"Ürün #{urun_id}")
+                    )
                 elif delta < 0:
                     self.urun_repo.restore_stock(urun_id, -delta)
 

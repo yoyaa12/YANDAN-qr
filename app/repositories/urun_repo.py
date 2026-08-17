@@ -27,9 +27,16 @@ class UrunRepository:
             if value is not None:
                 self.db.execute_non_query(f"UPDATE Urunler SET {key} = ? WHERE id = ?", (value, urun_id))
 
-    def update_stock(self, urun_id: int, decrement: int):
+    def update_stock(self, urun_id: int, decrement: int) -> int:
+        """Stoğu atomik olarak düşürür ve etkilenen satır sayısını döner.
+
+        `0` dönmesi, araya giren başka bir siparişin stoğu bu isteğin altına
+        indirdiği anlamına gelir. Çağıran bunu sessizce geçemez: koşul
+        tutmadığında sorgu hiçbir şey yapmaz, yani sipariş stoktan düşülmeden
+        kabul edilmiş olur.
+        """
         query = "UPDATE Urunler SET stok_miktari = stok_miktari - ? WHERE id = ? AND stok_miktari >= ?"
-        self.db.execute_non_query(query, (decrement, urun_id, decrement))
+        return self.db.execute_update(query, (decrement, urun_id, decrement))
 
     def restore_stock(self, urun_id: int, increment: int):
         """Return quantities to stock when an order line shrinks or is removed."""

@@ -465,6 +465,12 @@ async function checkActiveOrder() {
         });
 
         if (res.status === 401 || res.status === 403) {
+            // Oturum iptal edilmiş (adisyon kapanmış) veya geçersiz. Ölü token'ı
+            // saklamaya devam etmek, sonraki sipariş denemesinde kafa karıştırıcı
+            // bir 401'e yol açar; sipariş akışı zaten kod ekranıyla kurtarıyor.
+            if (res.status === 401) {
+                localStorage.removeItem('qr_session_token_' + state.masaId);
+            }
             // Token invalid or missing, clear orders
             state.activeOrders = [];
             state.currentOrder = null;
@@ -1512,8 +1518,10 @@ async function executeOrderSubmit(odemeYontemi) {
             } else {
                 showToast("🛎️ Siparişiniz iletildi! Garsonumuz masanıza geliyor.");
             }
-        } else if (res.status === 403 && data.detail && data.detail.includes("6 haneli")) {
-            // İlk sipariş güvenlik onayı gerekiyor!
+        } else if (res.status === 401 || (res.status === 403 && data.detail && data.detail.includes("6 haneli"))) {
+            // 403: masa BOŞ, ilk sipariş için fiziksel kod isteniyor.
+            // 401: masanın adisyonu kapandığı için oturum iptal edilmiş.
+            // Her iki durumda da çözüm aynı: masadaki güncel 6 haneli kod.
             openFirstOrderPINModal(odemeYontemi);
         } else {
             showToast(data.detail || "⚠️ Hata oluştu.");
@@ -1545,14 +1553,55 @@ function closeFirstOrderPINModal() {
     if (modal) modal.classList.remove('active');
 }
 
-function submitFirstOrderPIN() {
+// Girilen 6 haneli kodu doğrulatıp taze bir müşteri oturumu alır.
+// Masanın adisyonu kapandığında sunucu eski oturumu iptal ettiği için, kod tek
+// başına yetmez: sipariş isteği koda hiç bakılmadan 401 ile geri döner. Bu
+// yüzden önce oturumu yenileriz.
+async function refreshCustomerSession(code) {
+    try {
+        const res = await fetch(`/api/masalar/${state.masaId}/verify-qr`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: code, device_id: state.deviceId })
+        });
+        if (!res.ok) return false;
+
+        const data = await res.json();
+        if (!data.valid || !data.session_token) return false;
+
+        localStorage.setItem('qr_session_token_' + state.masaId, data.session_token);
+
+        // Soketi yeni oturumla tekrar bağla ki canlı takip yeni adisyonu izlesin.
+        if (socket) {
+            try {
+                socket.auth = { token: data.session_token, masa_id: state.masaId };
+                socket.disconnect();
+                socket.connect();
+            } catch (e) { /* canlı takip kopsa da sipariş akışı sürmeli */ }
+        }
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+async function submitFirstOrderPIN() {
     const input = document.getElementById('securityPinInput');
-    if (!input || !input.value || input.value.length < 6) {
+    if (!input || !input.value || input.value.trim().length < 6) {
         showToast("⚠️ Lütfen 6 haneli güvenlik kodunu eksiksiz girin.");
         return;
     }
 
-    state.currentTotpToken = input.value.trim();
+    const code = input.value.trim();
+    const sessionReady = await refreshCustomerSession(code);
+    if (!sessionReady) {
+        showToast("⚠️ Kod doğrulanamadı. Masadaki ekranda yazan güncel kodu girin.");
+        input.value = '';
+        input.focus();
+        return;
+    }
+
+    state.currentTotpToken = code;
     closeFirstOrderPINModal();
 
     // Modal kapanınca siparişi otomatik tekrar dene
