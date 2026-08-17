@@ -36,6 +36,16 @@ def enforce_order_status_role(
 
 
 _ALLOWED_STATE_TRANSITIONS: dict[str, set[str]] = {
+    # Legacy initial state. No code path produces it today, but historical rows
+    # can still carry it, so it must be mapped: an unmapped status would be
+    # rejected outright by the fail-closed guard in
+    # validate_order_state_transition.
+    OrderStatus.PAYMENT_PENDING.value: {
+        OrderStatus.WAITER_APPROVED_IN_KITCHEN.value,
+        OrderStatus.PAID_IN_KITCHEN.value,
+        OrderStatus.CANCELLED.value,
+        OrderAction.CASH_COLLECTED.value,
+    },
     OrderStatus.CASH_PENDING.value: {
         OrderStatus.WAITER_APPROVED_IN_KITCHEN.value,
         OrderStatus.DELIVERED.value,
@@ -88,8 +98,16 @@ def validate_order_state_transition(
             detail="Bu sipariş sonlandırılmış durumdadır (iptal/kapatıldı), durumu değiştirilemez.",
         )
 
+    # Fail-closed: an unrecognised current status must not silently permit every
+    # transition. Previously a status missing from the map skipped the check
+    # entirely, so a single unmapped value disabled the whole state machine.
     allowed = _ALLOWED_STATE_TRANSITIONS.get(curr)
-    if allowed is not None and req not in allowed:
+    if allowed is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Sipariş bilinmeyen bir durumda ('{curr}'), durum değişikliği yapılamaz.",
+        )
+    if req not in allowed:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"'{curr}' durumundaki sipariş '{req}' durumuna geçirilemez.",

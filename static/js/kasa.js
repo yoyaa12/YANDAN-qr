@@ -429,11 +429,11 @@ window.paySingleSiparisBatch = async function (siparisId, tutar) {
             await loadKasaData();
             renderActiveTicketWorkstation();
         } else {
-            alert("Fiş tahsilatı yapılırken hata oluştu: " + (data.message || 'Bilinmeyen hata'));
+            appAlert("Fiş tahsilatı yapılırken hata oluştu: " + (data.message || 'Bilinmeyen hata'));
         }
     } catch (e) {
         console.error("Single batch pay error:", e);
-        alert("Bağlantı hatası!");
+        appAlert("Bağlantı hatası!");
     }
 };
 
@@ -1023,7 +1023,7 @@ window.toggleSelectAllItems = function (isChecked) {
 
 window.processQuickPayment = async function (paymentMethod) {
     if (!activeMasaId) {
-        alert("Lütfen tahsilat yapmak için önce bir masa seçiniz.");
+        appAlert("Lütfen tahsilat yapmak için önce bir masa seçiniz.");
         return;
     }
 
@@ -1041,7 +1041,7 @@ window.processQuickPayment = async function (paymentMethod) {
     const remaining = Math.max(0, subtotal - calculatedDiscount - paidBefore);
 
     if (remaining <= 0 && subtotal === 0) {
-        alert("Bu masada ödenecek adisyon tutarı bulunmuyor.");
+        appAlert("Bu masada ödenecek adisyon tutarı bulunmuyor.");
         return;
     }
 
@@ -1307,7 +1307,7 @@ window.handleShortcut = function (key) {
 
 window.openDiscountModal = function () {
     if (!activeMasaId) {
-        alert("Lütfen iskonto uygulamak için bir masa seçiniz.");
+        appAlert("Lütfen iskonto uygulamak için bir masa seçiniz.");
         return;
     }
     document.getElementById('discountValueInput').value = discountValue ? parseFloat(discountValue).toFixed(2) : '';
@@ -1366,7 +1366,7 @@ window.clearDiscount = function () {
 window.applyIkramToSelectedItems = function () {
     const selected = currentTableItems.filter(i => i.selected);
     if (selected.length === 0) {
-        alert("Lütfen ikram etmek veya ikramı iptal etmek istediğiniz en az 1 ürünü tablodan seçiniz.");
+        appAlert("Lütfen ikram etmek veya ikramı iptal etmek istediğiniz en az 1 ürünü tablodan seçiniz.");
         return;
     }
 
@@ -1382,7 +1382,7 @@ window.applyIkramToSelectedItems = function () {
 // MASA TAŞIMA MODALİ (F7)
 window.openMoveTableModal = function () {
     if (!activeMasaId) {
-        alert("Lütfen taşımak istediğiniz masayı seçiniz.");
+        appAlert("Lütfen taşımak istediğiniz masayı seçiniz.");
         return;
     }
     const table = kasaTables.find(t => t.id === activeMasaId);
@@ -1415,14 +1415,14 @@ window.confirmMoveTable = async function () {
             showKasaToast(`🔄 Masa hesabı başarıyla ${targetTable ? getFormattedMasaNo(targetTable.masa_no) : ''} hesabına aktarıldı.`);
         }
     } catch (e) {
-        alert("Masa taşıma başarısız oldu.");
+        appAlert("Masa taşıma başarısız oldu.");
     }
 };
 
 // FİŞ / ADİSYON YAZDIRMA ÖNİZLEMESİ (F8)
 window.printReceiptPreview = function () {
     if (!activeMasaId) {
-        alert("Lütfen adisyon fişi yazdırmak için bir masa seçiniz.");
+        appAlert("Lütfen adisyon fişi yazdırmak için bir masa seçiniz.");
         return;
     }
     const table = kasaTables.find(t => t.id === activeMasaId);
@@ -1453,7 +1453,7 @@ window.printReceiptPreview = function () {
     currentTableItems.forEach(item => {
         html += `
             <div style="display:flex; justify-content:space-between; margin-bottom:3px;">
-                <span>${item.adet}x ${item.urun_adi}</span>
+                <span>${item.adet}x ${escapeHtml(item.urun_adi)}</span>
                 <span>${item.isIkram ? 'IKRAM' : item.ara_toplam.toFixed(2) + ' TL'}</span>
             </div>
         `;
@@ -1605,7 +1605,7 @@ function renderTransferItemsList() {
             <label style="display:flex; justify-content:space-between; align-items:center; padding:6px 4px; border-bottom:1px solid rgba(255,255,255,0.08); cursor:pointer;">
                 <div style="display:flex; align-items:center; gap:8px;">
                     <input type="checkbox" class="transfer-item-checkbox" value="${item.id || idx}" checked style="accent-color:#6366f1; width:16px; height:16px;">
-                    <span style="font-weight:700; font-size:0.9rem; color:#fff;">${item.adet}x ${item.urun_adi}</span>
+                    <span style="font-weight:700; font-size:0.9rem; color:#fff;">${item.adet}x ${escapeHtml(item.urun_adi)}</span>
                 </div>
                 <span style="font-weight:800; color:#fbbf24; font-size:0.9rem;">${(item.ara_toplam || (item.birim_fiyat * item.adet)).toFixed(2)} ₺</span>
             </label>
@@ -1738,7 +1738,7 @@ window.showDynamicQRModal = async function (masaId) {
         }, 1000);
 
     } catch (e) {
-        alert("Dinamik QR verisi çekilemedi.");
+        appAlert("Dinamik QR verisi çekilemedi.");
     }
 };
 

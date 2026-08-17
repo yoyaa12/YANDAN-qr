@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import socketio
 from urllib.parse import parse_qs
 from app.core.events import event_bus
@@ -8,8 +9,15 @@ from app.database import DatabaseSession
 from app.repositories.auth_repo import AuthRepository
 from app.services.auth_service import AuthService
 
-# Socket.io Async Sunucusu Oluşturma
-sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins='*')
+logger = logging.getLogger(__name__)
+
+# Socket.io Async Sunucusu Oluşturma.
+# cors_allowed_origins bilinçli olarak verilmiyor: python-engineio varsayılanı
+# "yalnızca same-origin". Önceki '*' değeri, main.py'deki kısıtlı CORS
+# yapılandırmasını WebSocket yolunda etkisiz bırakıyordu. Same-origin varsayılanı
+# telefonların LAN üzerinden bağlanmasını engellemez, çünkü sayfa ve soket aynı
+# origin'den servis edilir.
+sio = socketio.AsyncServer(async_mode='asgi')
 
 # Masada menüyü inceleyen / sepete ürün ekleyen masaların sunucu tarafında takibi
 BROWSING_TABLES = {}
@@ -54,6 +62,15 @@ def _extract_token_and_params(auth, environ):
     return token, masa_id_param
 
 
+def _coerce_masa_id(value) -> int | None:
+    """Normalise a table id that arrived from an untrusted client payload."""
+    try:
+        masa_id = int(value)
+    except (ValueError, TypeError):
+        return None
+    return masa_id if masa_id > 0 else None
+
+
 @sio.event
 async def connect(sid, environ, auth=None):
     # 1. Transport Upgrade (polling -> websocket) veya Reconnect: Var olan oturum yetkilerini anında koru
@@ -66,7 +83,11 @@ async def connect(sid, environ, auth=None):
                 if role_val:
                     await sio.enter_room(sid, f"role_{role_val}")
                     await sio.enter_room(sid, "staff")
-                    print(f"[Socket.io] Personel oturumu korundu (Transport Upgrade/Reconnect): sid: {sid}, rol: {role_val}")
+                    logger.info(
+                        "Personel oturumu korundu (Transport Upgrade/Reconnect): sid: %s, rol: %s",
+                        sid,
+                        role_val,
+                    )
                     return
             elif existing.get("user_type") == "CUSTOMER":
                 masa_id = existing.get("masa_id")
@@ -77,7 +98,8 @@ async def connect(sid, environ, auth=None):
         pass
 
     token, masa_id_param = _extract_token_and_params(auth, environ)
-    auth_data = {"user_type": "ANONYMOUS", "masa_id": masa_id_param}
+    masa_id_param = _coerce_masa_id(masa_id_param)
+    auth_data = {"user_type": "ANONYMOUS", "masa_id": None, "claimed_masa_id": masa_id_param}
 
     if token:
         # 2. Staff JWT Token Kontrolü (Tamamen In-Memory HMAC Doğrulaması - Event Loop Bloklamaz)
@@ -93,9 +115,13 @@ async def connect(sid, environ, auth=None):
                     "user_id": claims.subject,
                     "username": f"User_{claims.subject}"
                 }
-                print(f"[Socket.io] Personel baglandi: ID {claims.subject} (Rol: {role_val}, sid: {sid})")
-            except (TokenValidationError, AuthConfigurationError, Exception) as exc:
-                print(f"[Socket.io] Personel token dogrulama hatasi: {exc}")
+                logger.info(
+                    "Personel baglandi: ID %s (Rol: %s, sid: %s)", claims.subject, role_val, sid
+                )
+            except (TokenValidationError, AuthConfigurationError) as exc:
+                logger.warning("Personel token dogrulama hatasi (sid: %s): %s", sid, exc)
+            except Exception:
+                logger.exception("Personel handshake beklenmeyen hata (sid: %s)", sid)
 
         # 3. Müşteri Session Token Kontrolü (Thread Executor ile DB Sorgusu - Event Loop Bloklamaz)
         else:
@@ -113,22 +139,28 @@ async def connect(sid, environ, auth=None):
                         "masa_id": masa_id,
                         "session_token": token
                     }
-                    print(f"[Socket.io] Musteri baglandi: Masa {masa_id} (sid: {sid})")
-            except Exception as exc:
-                print(f"[Socket.io] Musteri session dogrulama hatasi: {exc}")
+                    logger.info("Musteri baglandi: Masa %s (sid: %s)", masa_id, sid)
+            except Exception:
+                logger.exception("Musteri session dogrulama hatasi (sid: %s)", sid)
 
-    # 4. Anonim/Public İstemci Masa Odası Katılımı
+    # 4. Anonim/Public İstemci.
+    # Doğrulanmamış bir istemci ASLA table_* odasına alınmaz: o odalar sipariş
+    # kalemleri, tutar ve ödeme durumu taşıyan olayları dağıtır. İstemcinin
+    # gönderdiği masa_id yalnızca "bu masada biri menüye bakıyor" ipucu olarak
+    # saklanır ve personele bildirim dışında hiçbir yetki vermez.
     if auth_data["user_type"] == "ANONYMOUS" and masa_id_param:
-        await sio.enter_room(sid, f"table_{masa_id_param}")
-        SID_TO_MASA[sid] = masa_id_param
-        print(f"[Socket.io] Anonim istemci baglandi: Masa {masa_id_param} (sid: {sid})")
+        logger.info(
+            "Anonim istemci baglandi (masa odasina alinmadi): iddia edilen masa %s, sid: %s",
+            masa_id_param,
+            sid,
+        )
 
     await sio.save_session(sid, auth_data)
 
 
 @sio.event
 async def disconnect(sid):
-    print(f"[Socket.io] Istemci ayrildi: {sid}")
+    logger.info("Istemci ayrildi: %s", sid)
     if sid in SID_TO_MASA:
         masa_id = SID_TO_MASA[sid]
         del SID_TO_MASA[sid]
@@ -139,16 +171,27 @@ async def disconnect(sid):
                 await sio.emit("masa_temizlendi", {"masa_id": masa_id}, room="staff")
 
 
+async def _resolve_presence_masa_id(sid, data) -> int | None:
+    """Resolve the table id for a presence hint.
+
+    A verified customer session is authoritative. Otherwise the client-supplied
+    value is used *only* to tell staff that somebody is browsing at that table;
+    it never grants room membership, so a spoofed id can create a stray waiter
+    notification but cannot expose another table's order data.
+    """
+    session = await sio.get_session(sid) or {}
+    masa_id = session.get("masa_id")
+    if masa_id:
+        return _coerce_masa_id(masa_id)
+
+    if isinstance(data, dict) and "masa_id" in data:
+        return _coerce_masa_id(data["masa_id"])
+    return _coerce_masa_id(session.get("claimed_masa_id"))
+
+
 @sio.event
 async def musteri_oturdu(sid, data):
-    session = await sio.get_session(sid)
-    masa_id = session.get("masa_id")
-
-    if not masa_id and data and isinstance(data, dict) and "masa_id" in data:
-        try:
-            masa_id = int(data["masa_id"])
-        except (ValueError, TypeError):
-            pass
+    masa_id = await _resolve_presence_masa_id(sid, data)
 
     if masa_id:
         SID_TO_MASA[sid] = masa_id
@@ -173,14 +216,7 @@ async def musteri_oturdu(sid, data):
 
 @sio.event
 async def musteri_urun_secti(sid, data):
-    session = await sio.get_session(sid)
-    masa_id = session.get("masa_id")
-
-    if not masa_id and data and isinstance(data, dict) and "masa_id" in data:
-        try:
-            masa_id = int(data["masa_id"])
-        except (ValueError, TypeError):
-            pass
+    masa_id = await _resolve_presence_masa_id(sid, data)
 
     if masa_id and data and isinstance(data, dict):
         item_count = data.get("item_count", 0)
@@ -290,7 +326,12 @@ async def on_masa_tasindi(payload):
                 for sid in sids:
                     SID_TO_MASA[sid] = to_id
                     await sio.leave_room(sid, f"table_{from_id}")
-                    await sio.enter_room(sid, f"table_{to_id}")
+                    # Presence takibi anonim istemcileri de içerir; masa taşıma
+                    # onları hedef masanın odasına sokmamalı. Aksi halde
+                    # handshake'te kapatılan yetkisiz erişim buradan geri gelirdi.
+                    session = await sio.get_session(sid) or {}
+                    if session.get("user_type") == "CUSTOMER" and session.get("masa_id"):
+                        await sio.enter_room(sid, f"table_{to_id}")
 
             if from_id in BROWSING_TABLES:
                 data = BROWSING_TABLES.pop(from_id)
@@ -298,7 +339,7 @@ async def on_masa_tasindi(payload):
                 data["masa_no"] = payload.get("to_masa_no", f"Masa {to_id}")
                 BROWSING_TABLES[to_id] = data
         except Exception as e:
-            print(f"[Socket.io] Error updating session on table move: {e}")
+            logger.exception("Masa tasima sirasinda oturum guncellenemedi")
 
     await sio.emit("masa_tasindi", payload, room="staff")
     if isinstance(payload, dict) and "from_masa_id" in payload:

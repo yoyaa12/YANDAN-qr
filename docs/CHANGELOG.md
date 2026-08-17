@@ -1320,3 +1320,133 @@ without any visible feedback.
   `socket_manager.py` and its corresponding test.
 - Continue Milestone 8 (multiple-device/session behavior) and Milestone 9
   (security audit).
+
+---
+
+### 2026-08-17 - Security Audit Remediation: order-edit pricing, socket isolation, QR throttling, UI rule compliance
+
+#### Summary
+
+Full-codebase review findings were remediated. Three high-severity issues were
+closed (client-priced order edits, unauthenticated realtime table access,
+unthrottled QR verification), five medium issues were fixed, and the AGENTS.md
+frontend rules that were documented but violated in code are now enforced by
+contract tests.
+
+#### Files created
+
+- `tests/test_order_edit_authorization.py`
+- `tests/test_qr_verification_hardening.py`
+- `tests/frontend/ui_rules_contract.test.cjs`
+- `requirements.txt`, `LICENSE`
+
+#### Files modified
+
+- `app/services/siparis_service.py`, `app/services/masa_service.py`,
+  `app/services/order_authorization.py`, `app/repositories/siparis_repo.py`,
+  `app/repositories/urun_repo.py`, `app/auth/dependencies.py`,
+  `app/auth/rate_limit.py`, `app/core/socket_manager.py`,
+  `app/core/totp_service.py`, `app/services/auth_service.py`,
+  `app/schemas/orders.py`, `app/schemas/tables.py`,
+  `app/api/v1/endpoints/siparisler.py`, `app/api/v1/endpoints/masalar.py`,
+  `app/api/v1/endpoints/kategoriler.py`, `app/api/views.py`,
+  `static/css/style.css`, `static/js/kasa.js`, `static/js/kitchen.js`,
+  `static/js/rulet.js`, `static/js/ui_confirm.js`, `static/js/staff_auth.js`,
+  all `templates/*.html` (asset versions), `.gitignore`, `.env.example`,
+  `README.md`
+
+#### Files deleted
+
+- `app/core/image_loader.py` (comment-only file, zero references)
+
+#### Database / migrations
+
+- None. Persisting `TABLE_MOVES_MAP`, the TOTP replay set and browsing state
+  would require new tables; per AGENTS.md §40 this is left as a pending
+  decision rather than applied unilaterally.
+
+#### API changes
+
+- `PUT /siparisler/{id}`: `toplam_tutar` and `birim_fiyat` are now advisory.
+  The server recomputes both from `Urunler`. `garson_adi` removed from
+  `SiparisDuzenleModel` and `DurumGuncelleModel` (taken from the principal).
+- `GET /masalar`: browsing detail (`secim_durumu`) is returned only to
+  authenticated staff; the endpoint stays public for the customer menu.
+- `POST /masalar/{id}/verify-qr`: may now return `429` with `Retry-After`.
+- `validate_order_state_transition` returns `409` for an unmapped status
+  instead of permitting every transition.
+- `GET /masalar/all-tahsilatlar`: logic moved from the controller into
+  `SiparisService.get_all_masa_tahsilatlari()`; response unchanged.
+
+#### Authentication / authorization changes
+
+- Socket.IO: an unauthenticated client can no longer join `table_{id}`.
+  Client-supplied `masa_id` is retained only as `claimed_masa_id` for staff
+  presence hints. Table moves no longer relocate anonymous sockets into the
+  target room.
+- Socket.IO `cors_allowed_origins='*'` removed; the engineio default
+  (same-origin only) now applies, matching the restricted CORS in `main.py`.
+- New `qr_verify_limiter` (10 failures / 60s) keyed on hashed source IP and
+  table id.
+- New `get_optional_staff` dependency for endpoints that are public but reveal
+  more to staff.
+
+#### Tests added or modified
+
+- 43 new Python tests (82 -> 125) and 10 new frontend tests (16 -> 26).
+- `tests/test_order_business_rules.py`: state-machine fail-closed cases, an
+  enum-coverage drift guard, idempotency-cache eviction.
+- `tests/test_socket_auth.py`: anonymous isolation, invalid-token fallthrough,
+  table-move leakage, `_coerce_masa_id`, socket CORS policy.
+
+#### Tests run and results
+
+- `python -m unittest discover -s tests` -> 125 tests, OK.
+- `node --test "tests/frontend/**/*.test.cjs"` -> 26 tests, 26 pass.
+- `app.main` imports cleanly; all 32 routes present in the OpenAPI schema.
+
+#### Architectural decisions
+
+- The repository layer no longer accepts a request model on the edit path
+  (`update_siparis_items` -> `replace_siparis_items`, taking server-priced
+  dicts), so a client price has no route to the database.
+- Product lookups were deduplicated: `create_siparis` previously validated and
+  priced every line twice, issuing two `get_by_id` calls per item.
+- Function-level imports across `masa_service`, `auth_service` and
+  `dependencies` were hoisted; verification showed no circular dependency
+  existed, so the workaround was unnecessary.
+- `transition: all` was replaced with an explicit property list rather than
+  dropping animations, preserving the existing look.
+
+#### Security impact
+
+- HIGH: staff could set an arbitrary order total and unit price via
+  `PUT /siparisler/{id}`; stock also drifted because the edit path never
+  adjusted it. Both closed.
+- HIGH: any unauthenticated client could subscribe to a table's realtime feed
+  (order lines, totals, payment status) with `?masa_id=N`. Closed.
+- HIGH: `/verify-qr` had no throttle against a 6-digit code with five
+  simultaneously valid windows. Closed.
+- MEDIUM: unmapped order status disabled the whole state machine (fail-open);
+  negative `tahsilat` amounts were accepted; browsing state leaked publicly.
+
+#### Unresolved issues
+
+- Process-memory state (`TABLE_MOVES_MAP`, `_used_tokens`, `BROWSING_TABLES`)
+  is still lost on restart and unshared across workers. The idempotency cache
+  now evicts, so the unbounded-growth leak is gone, but persistence needs a
+  schema decision.
+- `device_id` still acts as a bearer credential on the "returning device" QR
+  path. Brute force is now throttled, but changing this is a business-rule
+  change under AGENTS.md §14/§40 and needs approval.
+- Option pricing is still derived from Turkish substrings in `urun_notu`
+  (`"Orta Boy" in note`). Moving it to the catalogue requires a schema change.
+- Several non-money panel paths still use bare `fetch` without an `res.ok`
+  check.
+- The unreachable transport-upgrade branch in `socket_manager.connect()`
+  remains, along with its test; removing it is still an open decision.
+
+#### Next action
+
+- Decide on persistence for table-move and replay state (schema change).
+- Decide whether option pricing moves into the product catalogue.

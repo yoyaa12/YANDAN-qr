@@ -22,14 +22,25 @@ class SiparisOlusturModel(BaseModel):
 
 
 class SiparisDuzenleModel(BaseModel):
+    """Staff order-edit request.
+
+    ``toplam_tutar`` and each line's ``birim_fiyat`` are advisory only: the
+    service recomputes both from the product catalogue. There is deliberately no
+    ``garson_adi`` field — the audit name is taken from the authenticated
+    principal so it cannot be forged by the caller.
+    """
+
     toplam_tutar: float = Field(ge=0)
     urunler: List[SiparisItemModel] = Field(min_length=1)
-    garson_adi: Optional[str] = Field(default=None, max_length=100)
 
 
 class DurumGuncelleModel(BaseModel):
+    """Order status transition request.
+
+    ``garson_adi`` is intentionally absent for the same reason as above.
+    """
+
     yeni_durum: Union[OrderStatus, OrderAction]
-    garson_adi: Optional[str] = Field(default=None, max_length=100)
     pin_code: Optional[str] = Field(default=None, max_length=255)
 
     @field_validator("yeni_durum", mode="before")

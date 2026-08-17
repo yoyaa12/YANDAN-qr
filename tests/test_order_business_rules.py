@@ -56,7 +56,7 @@ class TestOrderBusinessRules(unittest.TestCase):
         )
 
         with self.assertRaises(HTTPException) as ctx:
-            self.service._process_order_items(101, data.urunler)
+            self.service._price_items_authoritatively(data.urunler)
 
         self.assertEqual(ctx.exception.status_code, 400)
         self.assertIn("satışa kapalıdır", ctx.exception.detail)
@@ -73,7 +73,8 @@ class TestOrderBusinessRules(unittest.TestCase):
         )
 
         with self.assertRaises(HTTPException) as ctx:
-            self.service._process_order_items(102, data.urunler)
+            priced, _total = self.service._price_items_authoritatively(data.urunler)
+            self.service._assert_stock_available(priced)
 
         self.assertEqual(ctx.exception.status_code, 400)
         self.assertIn("yetersiz stok", ctx.exception.detail)
@@ -97,6 +98,78 @@ class TestOrderBusinessRules(unittest.TestCase):
             validate_order_state_transition(OrderStatus.CANCELLED.value, OrderStatus.READY)
         self.assertEqual(ctx2.exception.status_code, 400)
         self.assertIn("sonlandırılmış durumdadır", ctx2.exception.detail)
+
+
+class TestStateMachineFailsClosed(unittest.TestCase):
+    """Haritada olmayan bir durum tüm geçişlere izin vermemelidir.
+
+    Önceki kod `allowed is not None` kontrolü yaptığı için eşlenmemiş tek bir
+    durum değeri o sipariş adına durum makinesini tamamen devre dışı bırakıyordu.
+    """
+
+    def test_unknown_status_is_rejected_instead_of_allowing_everything(self):
+        with self.assertRaises(HTTPException) as ctx:
+            validate_order_state_transition("bilinmeyen_durum", OrderStatus.DELIVERED)
+
+        self.assertEqual(ctx.exception.status_code, 409)
+        self.assertIn("bilinmeyen bir durumda", ctx.exception.detail)
+
+    def test_empty_status_is_rejected(self):
+        with self.assertRaises(HTTPException) as ctx:
+            validate_order_state_transition("", OrderStatus.PREPARING)
+        self.assertEqual(ctx.exception.status_code, 409)
+
+    def test_every_order_status_is_mapped(self):
+        """Drift koruması: enum'a yeni durum eklenirse harita da güncellenmeli."""
+        from app.services.order_authorization import _ALLOWED_STATE_TRANSITIONS
+
+        unmapped = [s.value for s in OrderStatus if s.value not in _ALLOWED_STATE_TRANSITIONS]
+        self.assertEqual(unmapped, [], f"Geçiş haritasında eksik durum(lar): {unmapped}")
+
+    def test_legacy_payment_pending_status_has_legal_transitions(self):
+        try:
+            validate_order_state_transition(
+                OrderStatus.PAYMENT_PENDING.value, OrderStatus.CANCELLED
+            )
+        except HTTPException:
+            self.fail("Legacy 'odeme_bekliyor' durumu iptal edilebilmeli")
+
+
+class TestIdempotencyCacheEviction(unittest.TestCase):
+    """Tekrarlı sipariş önbelleği süresiz büyümemelidir."""
+
+    def setUp(self):
+        from app.services import siparis_service
+        self.mod = siparis_service
+        self._original = dict(siparis_service._RECENT_ORDERS_CACHE)
+        self.addCleanup(self._restore)
+        siparis_service._RECENT_ORDERS_CACHE.clear()
+
+    def _restore(self):
+        self.mod._RECENT_ORDERS_CACHE.clear()
+        self.mod._RECENT_ORDERS_CACHE.update(self._original)
+
+    def test_expired_entries_are_dropped(self):
+        now = 1_000.0
+        window = self.mod._IDEMPOTENCY_WINDOW_SECONDS
+        self.mod._RECENT_ORDERS_CACHE["eski"] = (now - window - 1, "yanit")
+        self.mod._RECENT_ORDERS_CACHE["yeni"] = (now, "yanit")
+
+        self.mod._prune_idempotency_cache(now)
+
+        self.assertNotIn("eski", self.mod._RECENT_ORDERS_CACHE)
+        self.assertIn("yeni", self.mod._RECENT_ORDERS_CACHE)
+
+    def test_cache_is_capped_even_inside_one_window(self):
+        now = 1_000.0
+        limit = self.mod._IDEMPOTENCY_MAX_ENTRIES
+        for i in range(limit + 50):
+            # Hepsi taze; yalnizca tavan kurali devreye girmeli.
+            self.mod._RECENT_ORDERS_CACHE[f"k{i}"] = (now + i * 0.001, "yanit")
+
+        self.mod._prune_idempotency_cache(now)
+
+        self.assertLessEqual(len(self.mod._RECENT_ORDERS_CACHE), limit)
 
 
 if __name__ == "__main__":

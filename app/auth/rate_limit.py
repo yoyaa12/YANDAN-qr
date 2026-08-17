@@ -291,3 +291,12 @@ class ProcessLocalLoginRateLimiter:
 
 
 staff_login_limiter = ProcessLocalLoginRateLimiter()
+
+# Masa QR/TOTP doğrulaması kimlik istemez ve 6 haneli bir kod kabul eder.
+# ±2 pencere toleransı yüzünden aynı anda 5 kod geçerli olduğundan, kısıtlamasız
+# bir uç nokta çevrimiçi kaba kuvvete açıktır. Gerçek müşteri en fazla birkaç
+# deneme yapar, bu yüzden dakikada 10 başarısız deneme fazlasıyla yeterlidir.
+qr_verify_limiter = ProcessLocalLoginRateLimiter(
+    max_failures=10,
+    window_seconds=60,
+)

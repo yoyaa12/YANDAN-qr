@@ -71,5 +71,72 @@
         });
     }
 
+    const ALERT_ID = 'appAlertModal';
+
+    /**
+     * Uygulama geneli bilgi/hata kutusu (native alert() yerine).
+     *
+     * alert() de confirm() ile ayni tarayici diyalog politikasina tabidir:
+     * kullanici "ek diyalog gosterme" derse hata mesaji hic gorunmez ve islem
+     * sessizce basarisiz olmus gibi durur. Para ve sipariş akislarinda hatanin
+     * gorunur olmasi zorunlu oldugu icin uygulama ici modal kullanilir.
+     *
+     * Kullanim:  await appAlert('Tahsilat yapilamadi.');
+     */
+    function appAlert(message, options = {}) {
+        return new Promise(resolve => {
+            const existing = document.getElementById(ALERT_ID);
+            if (existing) existing.remove();
+
+            const overlay = document.createElement('div');
+            overlay.id = ALERT_ID;
+            overlay.className = 'modal-overlay active';
+            overlay.style.zIndex = '15001';
+            overlay.setAttribute('role', 'alertdialog');
+            overlay.setAttribute('aria-modal', 'true');
+            overlay.innerHTML = `
+                <div class="modal-content" style="max-width: 460px;">
+                    <div class="modal-header"><h3 id="appAlertTitle"></h3></div>
+                    <div id="appAlertMsg" style="padding:16px 4px; font-size:0.95rem; line-height:1.55; color:#e2e8f0;"></div>
+                    <div style="display:flex; gap:10px; margin-top:6px;">
+                        <button type="button" id="appAlertOk" class="btn-add"
+                            style="flex:1; justify-content:center;"></button>
+                    </div>
+                </div>`;
+            document.body.appendChild(overlay);
+
+            // Metin olarak yazilir: sunucudan gelen hata metni HTML olarak yorumlanmaz.
+            overlay.querySelector('#appAlertTitle').innerText = options.title || 'Bilgi';
+            overlay.querySelector('#appAlertMsg').innerText = message;
+            overlay.querySelector('#appAlertOk').innerText = options.okText || 'Tamam';
+
+            const finish = () => {
+                document.removeEventListener('keydown', onKey, true);
+                overlay.remove();
+                resolve();
+            };
+
+            const onKey = (e) => {
+                if (e.key === 'Escape' || e.key === 'Enter') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    finish();
+                    return;
+                }
+                if (/^F\d+$/.test(e.key)) { e.preventDefault(); e.stopPropagation(); }
+            };
+
+            overlay.querySelector('#appAlertOk').addEventListener('click', finish);
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) finish(); });
+            document.addEventListener('keydown', onKey, true);
+
+            setTimeout(() => {
+                const ok = overlay.querySelector('#appAlertOk');
+                if (ok) ok.focus();
+            }, 0);
+        });
+    }
+
     window.appConfirm = appConfirm;
+    window.appAlert = appAlert;
 }());

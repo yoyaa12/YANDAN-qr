@@ -248,10 +248,10 @@ async function updateOrderStatus(siparisId, yeniDurum) {
             loadKitchenOrders();
         } else {
             const data = await res.json().catch(() => ({}));
-            alert("Durum güncellenirken hata oluştu: " + (data.detail || "Sunucu hatası"));
+            appAlert("Durum güncellenirken hata oluştu: " + (data.detail || "Sunucu hatası"));
         }
     } catch (e) {
-        alert("Sunucuya ulaşılamadı.");
+        appAlert("Sunucuya ulaşılamadı.");
     }
 }
 

@@ -6,6 +6,7 @@ from typing import Optional, List
 
 from app.core.events import event_bus
 from app.core.socket_manager import clear_browsing_table
+from app.core.totp_service import verify_dynamic_token
 from app.auth.models import StaffPrincipal
 from app.enums import OrderAction, OrderStatus, PaymentMethod, PaymentStatus, TableStatus
 from app.repositories.siparis_repo import SiparisRepository
@@ -17,21 +18,37 @@ from app.schemas.orders import SiparisDurumResponse, SiparisResponse
 from app.services.order_authorization import enforce_order_status_role, validate_order_state_transition
 from app.database import db_transaction
 
-def sanitize_for_json(data):
-    if isinstance(data, dict):
-        return {k: sanitize_for_json(v) for k, v in data.items()}
-    elif isinstance(data, list):
-        return [sanitize_for_json(item) for item in data]
-    elif isinstance(data, (datetime.datetime, datetime.date, datetime.time)):
-        return data.strftime("%H:%M:%S") if isinstance(data, (datetime.datetime, datetime.time)) else str(data)
-    import decimal
-    if isinstance(data, decimal.Decimal):
-        return float(data)
-    return data
-
+# Masa taşıma yönlendirmeleri ve tekrarlı sipariş penceresi. Her ikisi de
+# process belleğindedir: yeniden başlatmada sıfırlanır ve birden fazla worker
+# arasında paylaşılmaz. Kalıcı hale getirmek yeni tablo (schema değişikliği)
+# gerektirdiği için AGENTS.md §40 uyarınca kullanıcı onayına bırakıldı.
 TABLE_MOVES_MAP = {}
 _RECENT_ORDERS_CACHE = {}
 _IDEMPOTENCY_WINDOW_SECONDS = 5
+_IDEMPOTENCY_MAX_ENTRIES = 512
+
+
+def _prune_idempotency_cache(now: float) -> None:
+    """Drop expired entries so the cache cannot grow without bound.
+
+    Without this the dictionary retained one SiparisResponse per distinct
+    (masa, cihaz, sepet) combination for the entire process lifetime.
+    """
+    expired = [
+        key
+        for key, (ts, _response) in _RECENT_ORDERS_CACHE.items()
+        if now - ts >= _IDEMPOTENCY_WINDOW_SECONDS
+    ]
+    for key in expired:
+        _RECENT_ORDERS_CACHE.pop(key, None)
+
+    # Hard ceiling for the pathological case of many distinct carts inside a
+    # single window: evict oldest first.
+    if len(_RECENT_ORDERS_CACHE) > _IDEMPOTENCY_MAX_ENTRIES:
+        for key, _value in sorted(
+            _RECENT_ORDERS_CACHE.items(), key=lambda kv: kv[1][0]
+        )[: len(_RECENT_ORDERS_CACHE) - _IDEMPOTENCY_MAX_ENTRIES]:
+            _RECENT_ORDERS_CACHE.pop(key, None)
 
 class SiparisService:
     def __init__(
@@ -62,7 +79,13 @@ class SiparisService:
             
         return odeme_durumu, siparis_durumu
 
-    def _calculate_item_authoritative_price(self, u_info: dict, item) -> tuple[float, float]:
+    def _calculate_item_authoritative_price(
+        self,
+        u_info: dict,
+        item,
+        *,
+        reject_underpriced_claim: bool = True,
+    ) -> tuple[float, float]:
         base_price = float(u_info.get("fiyat", 0.0))
         calculated_unit_price = base_price
         note = (item.urun_notu or "").strip()
@@ -90,7 +113,11 @@ class SiparisService:
 
         expected_unit_price = round(calculated_unit_price, 2)
 
-        if item.birim_fiyat < base_price:
+        # Tamper signal only. The charged price is always expected_unit_price;
+        # this guard merely rejects a client that openly claims a price below
+        # the catalogue base. It is skipped on the staff edit path, where
+        # discounts and ikram legitimately produce lower line prices.
+        if reject_underpriced_claim and item.birim_fiyat < base_price:
             raise HTTPException(
                 status_code=400,
                 detail=f"'{u_info.get('urun_adi')}' için gönderilen birim fiyat ({item.birim_fiyat} TL) veritabanı taban fiyatından ({base_price} TL) düşük olamaz."
@@ -99,8 +126,21 @@ class SiparisService:
         line_total = round(item.adet * expected_unit_price, 2)
         return expected_unit_price, line_total
 
-    def _process_order_items(self, siparis_id: int, urunler: list) -> List[dict]:
-        detaylar = []
+    def _price_items_authoritatively(
+        self,
+        urunler: list,
+        *,
+        reject_underpriced_claim: bool = True,
+    ) -> tuple[List[dict], float]:
+        """Resolve, validate and price every line against the database.
+
+        Each product is read exactly once. Unit prices come from ``Urunler`` and
+        the order total is the sum of the recomputed lines, so neither
+        ``birim_fiyat`` nor ``toplam_tutar`` from the request is ever trusted.
+        """
+        priced: List[dict] = []
+        order_total = 0.0
+
         for item in urunler:
             u_info = self.urun_repo.get_by_id(item.urun_id)
             if not u_info:
@@ -109,29 +149,69 @@ class SiparisService:
             if not u_info.get("aktif_mi", True):
                 raise HTTPException(status_code=400, detail=f"'{u_info.get('urun_adi')}' isimli ürün satışa kapalıdır.")
 
-            current_stock = u_info.get("stok_miktari")
-            if current_stock is not None and current_stock < item.adet:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"'{u_info.get('urun_adi')}' için yetersiz stok! (Mevcut stok: {current_stock}, İstenen: {item.adet})"
-                )
-
-            authoritative_unit_price, ara_toplam = self._calculate_item_authoritative_price(u_info, item)
-
-            self.siparis_repo.create_siparis_detay(
-                siparis_id, item.urun_id, item.adet, authoritative_unit_price, item.urun_notu or "", ara_toplam
+            unit_price, line_total = self._calculate_item_authoritative_price(
+                u_info, item, reject_underpriced_claim=reject_underpriced_claim
             )
+            order_total += line_total
 
-            self.urun_repo.update_stock(item.urun_id, item.adet)
-
-            detaylar.append({
+            priced.append({
                 "urun_id": item.urun_id,
                 "urun_adi": u_info.get("urun_adi", f"Ürün #{item.urun_id}"),
                 "adet": item.adet,
-                "birim_fiyat": authoritative_unit_price,
+                "birim_fiyat": unit_price,
                 "urun_notu": item.urun_notu or "",
-                "ara_toplam": ara_toplam
+                "ara_toplam": line_total,
+                "_stok_miktari": u_info.get("stok_miktari"),
             })
+
+        return priced, round(order_total, 2)
+
+    @staticmethod
+    def _assert_stock_available(
+        priced: List[dict],
+        already_reserved: Optional[dict] = None,
+    ) -> None:
+        """Reject lines that exceed available stock.
+
+        ``already_reserved`` holds quantities this same order has previously
+        taken out of stock, so editing an order does not double-count what it
+        already holds.
+        """
+        reserved = already_reserved or {}
+        wanted: dict = {}
+        for line in priced:
+            wanted[line["urun_id"]] = wanted.get(line["urun_id"], 0) + line["adet"]
+
+        seen: dict = {}
+        for line in priced:
+            seen.setdefault(line["urun_id"], line)
+
+        for urun_id, requested in wanted.items():
+            line = seen[urun_id]
+            current_stock = line.get("_stok_miktari")
+            if current_stock is None:
+                continue
+            available = current_stock + reserved.get(urun_id, 0)
+            if available < requested:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"'{line['urun_adi']}' için yetersiz stok! (Mevcut stok: {available}, İstenen: {requested})"
+                )
+
+    def _persist_order_items(self, siparis_id: int, priced: List[dict]) -> List[dict]:
+        """Write the priced lines and take their quantities out of stock."""
+        detaylar = []
+        for line in priced:
+            self.siparis_repo.create_siparis_detay(
+                siparis_id,
+                line["urun_id"],
+                line["adet"],
+                line["birim_fiyat"],
+                line["urun_notu"],
+                line["ara_toplam"],
+            )
+            self.urun_repo.update_stock(line["urun_id"], line["adet"])
+            detaylar.append({k: v for k, v in line.items() if not k.startswith("_")})
         return detaylar
 
     async def _publish_order_events(self, data: SiparisOlusturModel, siparis_id: int, masa_no: str, order_dict: dict):
@@ -170,6 +250,7 @@ class SiparisService:
         items_key = tuple(sorted((item.urun_id, item.adet, (item.urun_notu or "").strip()) for item in data.urunler))
         cache_key = (data.masa_id, data.device_id or "no-device", items_key)
         now = time.time()
+        _prune_idempotency_cache(now)
         if cache_key in _RECENT_ORDERS_CACHE:
             ts, prev_resp = _RECENT_ORDERS_CACHE[cache_key]
             if now - ts < _IDEMPOTENCY_WINDOW_SECONDS:
@@ -186,29 +267,15 @@ class SiparisService:
             if masa.get('durum') == TableStatus.EMPTY.value:
                 if not data.current_totp_token:
                     raise HTTPException(status_code=403, detail="Masa şu an BOŞ. İlk siparişi vermek için lütfen masadaki ekranın altında yazan 6 haneli güvenlik kodunu okutun.")
-                
-                from app.core.totp_service import verify_dynamic_token
+
                 totp_secret = masa.get("totp_secret")
                 if not totp_secret or not verify_dynamic_token(data.masa_id, totp_secret, data.current_totp_token, mark_as_used=True):
                     raise HTTPException(status_code=403, detail="Geçersiz veya süresi dolmuş kod! Lütfen masadaki ekranda yazan güncel 6 haneli güvenlik kodunu girin.")
 
-            calculated_order_total = 0.0
-            for item in data.urunler:
-                u_info = self.urun_repo.get_by_id(item.urun_id)
-                if not u_info:
-                    raise HTTPException(status_code=404, detail=f"Siparişteki Ürün #{item.urun_id} veritabanında bulunamadı!")
-                if not u_info.get("aktif_mi", True):
-                    raise HTTPException(status_code=400, detail=f"'{u_info.get('urun_adi')}' isimli ürün satışa kapalıdır.")
-                current_stock = u_info.get("stok_miktari")
-                if current_stock is not None and current_stock < item.adet:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"'{u_info.get('urun_adi')}' için yetersiz stok! (Mevcut stok: {current_stock}, İstenen: {item.adet})"
-                    )
-                _, line_total = self._calculate_item_authoritative_price(u_info, item)
-                calculated_order_total += line_total
-
-            calculated_order_total = round(calculated_order_total, 2)
+            # Ürünler tek geçişte okunur, doğrulanır ve fiyatlandırılır; toplam
+            # istemciden gelen değere bakılmaksızın burada hesaplanır.
+            priced_items, calculated_order_total = self._price_items_authoritatively(data.urunler)
+            self._assert_stock_available(priced_items)
             data.toplam_tutar = calculated_order_total
 
             siparis_kodu = f"SIP-{uuid.uuid4().hex[:6].upper()}"
@@ -227,7 +294,7 @@ class SiparisService:
                 raise HTTPException(status_code=500, detail="Sipariş veritabanına eklenirken hata oluştu.")
 
             self.masa_repo.update_durum(data.masa_id, TableStatus.OCCUPIED.value)
-            detaylar = self._process_order_items(siparis_id, data.urunler)
+            detaylar = self._persist_order_items(siparis_id, priced_items)
             clear_browsing_table(data.masa_id)
 
             full_order_dict = {
@@ -307,7 +374,9 @@ class SiparisService:
     ) -> SiparisDurumResponse:
         enforce_order_status_role(principal.role, data.yeni_durum)
         yeni_durum = data.yeni_durum.value
-        garson_adi = data.garson_adi or "Garson Berat"
+        # Denetim izi kimliği doğrulanmış personelden gelir; istekteki
+        # garson_adi alanı bağlayıcı değildir.
+        garson_adi = principal.username
         masa_bosaldi = False
 
         with db_transaction():
@@ -401,16 +470,58 @@ class SiparisService:
             {"masa_id": masa_id, "yeni_durum": TableStatus.EMPTY.value},
         )
 
-    async def update_siparis_items(self, siparis_id: int, data: SiparisDuzenleModel) -> SiparisResponse:
-        garson_adi = data.garson_adi or "Garson Berat"
-        
+    async def update_siparis_items(
+        self,
+        siparis_id: int,
+        data: SiparisDuzenleModel,
+        principal: StaffPrincipal,
+    ) -> SiparisResponse:
+        garson_adi = principal.username
+
         with db_transaction():
             s_info = self.siparis_repo.get_by_id(siparis_id)
             if not s_info:
                 raise HTTPException(status_code=404, detail="Sipariş bulunamadı!")
-            
-            self.siparis_repo.update_siparis_items(siparis_id, data.toplam_tutar, data.urunler, garson_adi)
-            
+
+            current_status = (s_info.get("siparis_durumu") or "").strip().lower()
+            if current_status in (OrderStatus.CANCELLED.value, OrderStatus.PAID_CLOSED.value):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Sonlandırılmış (iptal/kapatıldı) bir siparişin kalemleri değiştirilemez.",
+                )
+
+            # Kalemler ve toplam sunucuda yeniden hesaplanır. İstemcinin
+            # gönderdiği birim_fiyat ve toplam_tutar bağlayıcı değildir.
+            # İskonto/ikram akışları taban fiyatın altına inebildiği için
+            # taban fiyat iddiası bu yolda reddedilmez.
+            priced_items, authoritative_total = self._price_items_authoritatively(
+                data.urunler, reject_underpriced_claim=False
+            )
+
+            # Siparişin hâlihazırda stoktan düşürdüğü adetler yeni talebe mahsup
+            # edilir; aksi halde aynı sipariş kendi stoğuyla çakışırdı.
+            previous_details = self.siparis_repo.get_siparis_detaylari(siparis_id)
+            already_reserved: dict = {}
+            for detail in previous_details:
+                urun_id = detail["urun_id"]
+                already_reserved[urun_id] = already_reserved.get(urun_id, 0) + int(detail["adet"] or 0)
+            self._assert_stock_available(priced_items, already_reserved)
+
+            self.siparis_repo.replace_siparis_items(
+                siparis_id, authoritative_total, priced_items, garson_adi
+            )
+
+            # Stok yalnızca net fark kadar hareket eder.
+            requested: dict = {}
+            for line in priced_items:
+                requested[line["urun_id"]] = requested.get(line["urun_id"], 0) + line["adet"]
+            for urun_id in set(already_reserved) | set(requested):
+                delta = requested.get(urun_id, 0) - already_reserved.get(urun_id, 0)
+                if delta > 0:
+                    self.urun_repo.update_stock(urun_id, delta)
+                elif delta < 0:
+                    self.urun_repo.restore_stock(urun_id, -delta)
+
             updated_order = self.siparis_repo.get_by_id(siparis_id)
             s_dto = self._map_to_siparis_response(updated_order)
 
@@ -456,6 +567,13 @@ class SiparisService:
             {"masa_id": to_masa_id, "durum": TableStatus.OCCUPIED.value, "is_move": True},
         )
         await event_bus.publish("durum_guncellendi", event_payload)
+
+    def get_all_masa_tahsilatlari(self) -> dict:
+        """Aktif tahsilat toplamlarını masa id'sine göre döner."""
+        return {
+            str(masa["id"]): self.siparis_repo.get_masa_tahsilat_toplami(masa["id"])
+            for masa in self.masa_repo.get_all()
+        }
 
     async def add_tahsilat(self, masa_id: int, tutar: float, odeme_yontemi: str):
         with db_transaction():

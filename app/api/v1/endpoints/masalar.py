@@ -1,6 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException
 from typing import List
-from app.auth.dependencies import require_roles, get_current_user_or_customer
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+
+from app.auth.dependencies import (
+    get_current_user_or_customer,
+    get_optional_staff,
+    require_roles,
+)
 from app.auth.models import StaffPrincipal
 from app.enums import UserRole
 from app.services.masa_service import MasaService
@@ -10,13 +16,9 @@ from app.schemas.tables import (
     MasaResponse,
     MoveMasaModel,
     QRDogrulamaResponse,
+    TahsilatModel,
     VerifyQRModel,
 )
-from pydantic import BaseModel
-
-class TahsilatModel(BaseModel):
-    tutar: float
-    odeme_yontemi: str
 
 router = APIRouter()
 
@@ -24,8 +26,20 @@ table_operator = require_roles(UserRole.ADMIN, UserRole.WAITER, UserRole.CASHIER
 qr_display_operator = require_roles(UserRole.ADMIN, UserRole.CASHIER)
 
 @router.get("/masalar", response_model=List[MasaResponse])
-async def get_masalar(service: MasaService = Depends()):
-    return service.get_masalar_with_browsing()
+async def get_masalar(
+    service: MasaService = Depends(),
+    staff: StaffPrincipal | None = Depends(get_optional_staff),
+):
+    """Masa listesi.
+
+    Müşteri menüsü masa adını okumak için bu ucu kimliksiz çağırır, bu yüzden
+    uç public kalır. Ancak "hangi masa menüye bakıyor / sepete ne ekledi"
+    bilgisi operasyonel veridir ve yalnızca kimliği doğrulanmış personele
+    döndürülür.
+    """
+    if staff is not None:
+        return service.get_masalar_with_browsing()
+    return service.get_masalar()
 
 @router.get("/masalar/{masa_id}/aktif-siparis")
 async def get_masa_aktif_siparis(
@@ -73,11 +87,7 @@ async def get_all_dynamic_qrs(masa_service: MasaService = Depends()):
 )
 async def get_all_tahsilatlar(siparis_service: SiparisService = Depends()):
     """Tüm masaların aktif tahsilat toplamlarını döner."""
-    masalar = siparis_service.masa_repo.get_all()
-    res = {}
-    for m in masalar:
-        res[str(m['id'])] = siparis_service.siparis_repo.get_masa_tahsilat_toplami(m['id'])
-    return res
+    return siparis_service.get_all_masa_tahsilatlari()
 
 @router.get(
     "/masalar/{masa_id}/dynamic-qr",
@@ -88,9 +98,21 @@ async def get_dynamic_qr(masa_id: int, masa_service: MasaService = Depends()):
     return masa_service.get_dynamic_qr_info(masa_id)
 
 @router.post("/masalar/{masa_id}/verify-qr", response_model=QRDogrulamaResponse)
-async def verify_dynamic_qr(masa_id: int, data: VerifyQRModel, masa_service: MasaService = Depends()):
-    """Müşteri QR okuttuğunda gönderdiği dynamic token'ı doğrular."""
-    return masa_service.verify_dynamic_qr_with_device(masa_id, data.token, data.device_id)
+async def verify_dynamic_qr(
+    masa_id: int,
+    data: VerifyQRModel,
+    request: Request,
+    masa_service: MasaService = Depends(),
+):
+    """Müşteri QR okuttuğunda gönderdiği dynamic token'ı doğrular.
+
+    Kimlik doğrulaması gerektirmeyen tek doğrulama ucu olduğu için kaynak IP ve
+    masa bazlı hız sınırına tabidir.
+    """
+    client_host = request.client.host if request.client else "unknown"
+    return masa_service.verify_dynamic_qr_with_device(
+        masa_id, data.token, data.device_id, client_host=client_host
+    )
 
 @router.post(
     "/masalar/{masa_id}/tahsilat",

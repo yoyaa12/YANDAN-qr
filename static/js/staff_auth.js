@@ -54,7 +54,10 @@
     function resolveSessionWaiters() {
         const waiters = sessionWaiters;
         sessionWaiters = [];
-        waiters.forEach(resolve => resolve(currentSession));
+        waiters.forEach(waiter => {
+            if (waiter.timerId) clearTimeout(waiter.timerId);
+            waiter.resolve(currentSession);
+        });
     }
 
     function emit(name, detail) {
@@ -212,12 +215,26 @@
         }
     }
 
+    // Oturum beklerken sinirsiz askida kalinmaz. Personel giris yapmazsa bekleyen
+    // istek bu sure sonunda gorunur bir hata ile reddedilir; aksi halde cagiran
+    // kod (ornegin bir fetch) sessizce sonsuza kadar bekler ve kullaniciya
+    // "hicbir sey olmuyor" gibi gorunur.
+    const SESSION_WAIT_TIMEOUT_MS = 120000;
+
     async function waitForSession() {
         if (initialValidation) await initialValidation;
         if (isUsableSession(currentSession)) return currentSession;
         clearSession({ notify: false });
         requestAuthentication();
-        return new Promise(resolve => sessionWaiters.push(resolve));
+        return new Promise((resolve, reject) => {
+            const waiter = { resolve, reject, timerId: null };
+            waiter.timerId = setTimeout(() => {
+                const index = sessionWaiters.indexOf(waiter);
+                if (index !== -1) sessionWaiters.splice(index, 1);
+                reject(new Error('Personel oturumu açılmadığı için istek gönderilemedi.'));
+            }, SESSION_WAIT_TIMEOUT_MS);
+            sessionWaiters.push(waiter);
+        });
     }
 
     function requestDetails(input, init) {
@@ -242,6 +259,10 @@
         if (pathname === '/api/siparisler' && method === 'GET') return true;
         if (/^\/api\/siparisler\/\d+\/durum$/.test(pathname) && method === 'PATCH') return true;
         if (/^\/api\/siparisler\/\d+$/.test(pathname) && method === 'PUT') return true;
+        // Masa listesi public'tir, ancak "hangi masa menuye bakiyor" bilgisi
+        // yalnizca kimligi dogrulanmis personele doner. Panellerin bu bilgiyi
+        // gorebilmesi icin istek token ile gonderilir.
+        if (pathname === '/api/masalar' && method === 'GET') return true;
         if (pathname === '/api/masalar/move' && method === 'POST') return true;
         if (/^\/api\/masalar\/\d+\/clear$/.test(pathname) && method === 'POST') return true;
         if (pathname === '/api/masalar/all-dynamic-qrs' && method === 'GET') return true;

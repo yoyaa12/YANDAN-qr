@@ -12,6 +12,7 @@ from app.auth.tokens import (
 )
 from app.enums import TokenType, UserRole
 from app.repositories.auth_repo import AuthRepository
+from app.services.auth_service import AuthService
 
 
 staff_bearer = HTTPBearer(
@@ -71,6 +72,27 @@ def get_current_staff(
     )
 
 
+def get_optional_staff(
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None,
+        Security(staff_bearer),
+    ],
+    repo: Annotated[AuthRepository, Depends()],
+) -> StaffPrincipal | None:
+    """Return the staff principal when one is present, otherwise None.
+
+    For endpoints that are legitimately public but expose extra operational
+    detail to signed-in staff. An invalid token yields None rather than an
+    error, so a stale staff token cannot lock a customer out of the menu.
+    """
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        return None
+    try:
+        return get_current_staff(credentials, repo)
+    except HTTPException:
+        return None
+
+
 def require_roles(*allowed_roles: UserRole) -> Callable[..., StaffPrincipal]:
     if not allowed_roles:
         raise ValueError("At least one role is required")
@@ -105,8 +127,6 @@ def get_current_customer(
     ],
     repo: Annotated[AuthRepository, Depends()],
 ) -> dict:
-    from app.services.auth_service import AuthService
-    
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

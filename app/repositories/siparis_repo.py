@@ -45,18 +45,6 @@ class SiparisRepository:
         query = "SELECT sd.*, u.urun_adi FROM SiparisDetaylari sd JOIN Urunler u ON sd.urun_id = u.id WHERE sd.siparis_id = ?"
         return self.db.execute_query(query, (siparis_id,)) or []
 
-    def get_active_by_masa_id(self, masa_id: int):
-        query = """
-            SELECT TOP 1 s.*, m.masa_no 
-            FROM Siparisler s 
-            JOIN Masalar m ON s.masa_id = m.id 
-            WHERE s.masa_id = ? AND s.siparis_durumu != ?
-            ORDER BY s.id DESC
-        """
-        return self.db.execute_query(
-            query, (masa_id, OrderStatus.DELIVERED.value), fetch_one=True
-        )
-
     def get_all_active_by_masa_id(self, masa_id: int):
         query = """
             SELECT s.*, m.masa_no 
@@ -135,16 +123,35 @@ class SiparisRepository:
             ),
         )
 
-    def update_siparis_items(self, siparis_id: int, toplam_tutar: float, urunler: list, garson_adi: Optional[str] = None):
+    def replace_siparis_items(
+        self,
+        siparis_id: int,
+        toplam_tutar: float,
+        priced_items: List[Dict],
+        garson_adi: Optional[str] = None,
+    ):
+        """Replace an order's lines with server-priced ones.
+
+        ``priced_items`` carries unit prices and line totals already computed by
+        the service against the product catalogue. The repository deliberately
+        accepts no request model, so a client-supplied price cannot reach the
+        database through this path.
+        """
         if garson_adi:
             self.db.execute_non_query("UPDATE Siparisler SET toplam_tutar = ?, garson_adi = ? WHERE id = ?", (toplam_tutar, garson_adi, siparis_id))
         else:
             self.db.execute_non_query("UPDATE Siparisler SET toplam_tutar = ? WHERE id = ?", (toplam_tutar, siparis_id))
-        
+
         self.db.execute_non_query("DELETE FROM SiparisDetaylari WHERE siparis_id = ?", (siparis_id,))
-        for item in urunler:
-            ara_toplam = item.adet * item.birim_fiyat
-            self.create_siparis_detay(siparis_id, item.urun_id, item.adet, item.birim_fiyat, item.urun_notu or "", ara_toplam)
+        for line in priced_items:
+            self.create_siparis_detay(
+                siparis_id,
+                line["urun_id"],
+                line["adet"],
+                line["birim_fiyat"],
+                line.get("urun_notu") or "",
+                line["ara_toplam"],
+            )
 
     def move_orders_between_masalar(self, from_masa_id: int, to_masa_id: int):
         query = """

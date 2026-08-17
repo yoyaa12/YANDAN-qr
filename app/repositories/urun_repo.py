@@ -31,5 +31,10 @@ class UrunRepository:
         query = "UPDATE Urunler SET stok_miktari = stok_miktari - ? WHERE id = ? AND stok_miktari >= ?"
         self.db.execute_non_query(query, (decrement, urun_id, decrement))
 
+    def restore_stock(self, urun_id: int, increment: int):
+        """Return quantities to stock when an order line shrinks or is removed."""
+        query = "UPDATE Urunler SET stok_miktari = stok_miktari + ? WHERE id = ?"
+        self.db.execute_non_query(query, (increment, urun_id))
+
     def delete(self, urun_id: int):
         self.db.execute_non_query("DELETE FROM Urunler WHERE id = ?", (urun_id,))

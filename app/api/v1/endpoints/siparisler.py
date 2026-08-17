@@ -1,17 +1,19 @@
-from fastapi import APIRouter, Depends
-from typing import Optional, List
-from app.auth.dependencies import require_roles
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException
+
+from app.auth.dependencies import get_current_user_or_customer, require_roles
 from app.auth.models import StaffPrincipal
 from app.enums import UserRole
-from app.services.siparis_service import SiparisService
 from app.schemas.orders import (
-    SiparisOlusturModel, 
-    DurumGuncelleModel, 
+    DurumGuncelleModel,
+    SiparisDurumIslemCevapModel,
     SiparisDuzenleModel,
     SiparisIslemCevapModel,
-    SiparisDurumIslemCevapModel,
-    SiparisResponse
+    SiparisOlusturModel,
+    SiparisResponse,
 )
+from app.services.siparis_service import SiparisService
 
 router = APIRouter()
 
@@ -23,8 +25,6 @@ authenticated_staff = require_roles(
 )
 order_editor = require_roles(UserRole.ADMIN, UserRole.WAITER)
 
-from fastapi import HTTPException
-from app.auth.dependencies import get_current_user_or_customer
 
 @router.post("/siparisler", response_model=SiparisIslemCevapModel)
 async def create_siparis(
@@ -38,9 +38,10 @@ async def create_siparis(
                 status_code=403,
                 detail="Bu oturum ile sadece yetkili olduğunuz masaya sipariş verebilirsiniz."
             )
-        
+
     full_order = await service.create_siparis(data)
     return {"status": "success", "message": "Sipariş oluşturuldu.", "siparis": full_order}
+
 
 @router.get("/siparisler", response_model=List[SiparisResponse])
 async def get_siparisler(
@@ -51,6 +52,7 @@ async def get_siparisler(
 ):
     return service.get_siparisler(durum, masa_id)
 
+
 @router.patch("/siparisler/{siparis_id}/durum", response_model=SiparisDurumIslemCevapModel)
 async def update_siparis_durumu(
     siparis_id: int,
@@ -58,9 +60,9 @@ async def update_siparis_durumu(
     service: SiparisService = Depends(),
     principal: StaffPrincipal = Depends(authenticated_staff),
 ):
-    data = data.model_copy(update={"garson_adi": principal.username})
     event_payload = await service.update_siparis_durumu(siparis_id, data, principal)
     return {"status": "success", "message": "Sipariş güncellendi.", "data": event_payload}
+
 
 @router.put("/siparisler/{siparis_id}", response_model=SiparisIslemCevapModel)
 async def update_siparis_items(
@@ -69,6 +71,5 @@ async def update_siparis_items(
     service: SiparisService = Depends(),
     principal: StaffPrincipal = Depends(order_editor),
 ):
-    data = data.model_copy(update={"garson_adi": principal.username})
-    updated_order = await service.update_siparis_items(siparis_id, data)
+    updated_order = await service.update_siparis_items(siparis_id, data, principal)
     return {"status": "success", "message": "Sipariş kalemleri güncellendi.", "siparis": updated_order}

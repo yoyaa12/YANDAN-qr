@@ -22,8 +22,19 @@ class MoveMasaModel(BaseModel):
 
 
 class VerifyQRModel(BaseModel):
-    token: str = Field(min_length=1)
+    token: str = Field(min_length=1, max_length=32)
     device_id: Optional[str] = Field(default=None, max_length=100)
+
+
+class TahsilatModel(BaseModel):
+    """Partial payment recorded against a table.
+
+    ``tutar`` must be positive: a negative amount would subtract from the table's
+    collected total and make an unpaid bill look settled.
+    """
+
+    tutar: float = Field(gt=0)
+    odeme_yontemi: str = Field(min_length=1, max_length=50)
 
 
 class QRDogrulamaResponse(BaseModel):

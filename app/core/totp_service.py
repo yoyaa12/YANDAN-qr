@@ -1,8 +1,11 @@
 import hmac
 import hashlib
+import logging
 import time
 import secrets
-from typing import Dict, Set
+from typing import Set
+
+logger = logging.getLogger(__name__)
 
 # Replay Attack Prevention: Güvenli şekilde doğrulanmış token'ları saklama
 # Key: f"{masa_id}:{token}:{time_window}"
@@ -88,7 +91,9 @@ def verify_dynamic_token(masa_id: int, secret: str, token: str, timestamp: float
     for w in windows_to_check:
         token_entry = f"{masa_id}:{token}:{w}"
         if token_entry in _used_tokens:
-            print(f"[SECURITY GUARD] Replay attack detected for Table {masa_id} in window {w}")
+            logger.warning(
+                "Replay attack engellendi: masa %s, pencere %s", masa_id, w
+            )
             continue
 
         ts = w * 30
