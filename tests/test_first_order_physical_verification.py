@@ -20,6 +20,8 @@ from fastapi import HTTPException
 
 from app.core import totp_service
 from app.core.totp_service import (
+    TOTP_WINDOW_SECONDS,
+    TOTP_WINDOW_TOLERANCE,
     generate_dynamic_token,
     generate_secret_key,
     verify_dynamic_token,
@@ -64,8 +66,10 @@ class DynamicTokenServiceTests(unittest.TestCase):
             verify_dynamic_token(1, other_secret, token, self.now, mark_as_used=False)
         )
 
-    def test_tolerance_accepts_two_windows_in_each_direction(self):
-        for offset in (-60, -30, 0, 30, 60):
+    def test_tolerance_accepts_exactly_the_configured_windows(self):
+        accepted = range(-TOTP_WINDOW_TOLERANCE, TOTP_WINDOW_TOLERANCE + 1)
+        for windows in accepted:
+            offset = windows * TOTP_WINDOW_SECONDS
             with self.subTest(offset=offset):
                 token = generate_dynamic_token(self.secret, self.now + offset)
                 self.assertTrue(
@@ -75,8 +79,10 @@ class DynamicTokenServiceTests(unittest.TestCase):
                     f"{offset}s kaymasi kabul edilmeliydi",
                 )
 
-    def test_tolerance_stops_at_three_windows(self):
-        for offset in (-120, 120):
+    def test_tolerance_stops_one_window_past_the_limit(self):
+        beyond = TOTP_WINDOW_TOLERANCE + 1
+        for windows in (-beyond, beyond):
+            offset = windows * TOTP_WINDOW_SECONDS
             with self.subTest(offset=offset):
                 token = generate_dynamic_token(self.secret, self.now + offset)
                 self.assertFalse(
@@ -84,6 +90,33 @@ class DynamicTokenServiceTests(unittest.TestCase):
                         1, self.secret, token, self.now, mark_as_used=False
                     ),
                     f"{offset}s kaymasi reddedilmeliydi",
+                )
+
+    def test_a_scanned_code_stays_usable_for_under_a_minute(self):
+        """Kod QR'dan okunup ilk siparişte otomatik gönderildiği için, tolerans
+        doğrudan "QR okutmakla sipariş vermek arasında geçebilecek süre"dir.
+        Pencerenin başında okutulan kod en uzun, sonunda okutulan en kısa yaşar.
+        """
+        window_start = float(int(self.now // TOTP_WINDOW_SECONDS) * TOTP_WINDOW_SECONDS)
+
+        for scan_offset, expected_lifetime in ((0, 59), (TOTP_WINDOW_SECONDS - 1, 30)):
+            with self.subTest(scan_offset=scan_offset):
+                scan_time = window_start + scan_offset
+                token = generate_dynamic_token(self.secret, scan_time)
+
+                self.assertTrue(
+                    verify_dynamic_token(
+                        1, self.secret, token,
+                        scan_time + expected_lifetime, mark_as_used=False,
+                    ),
+                    f"{expected_lifetime}. saniyede hala gecerli olmaliydi",
+                )
+                self.assertFalse(
+                    verify_dynamic_token(
+                        1, self.secret, token,
+                        scan_time + expected_lifetime + 1, mark_as_used=False,
+                    ),
+                    f"{expected_lifetime + 1}. saniyede artik gecersiz olmaliydi",
                 )
 
     def test_a_consumed_token_cannot_be_replayed(self):
@@ -193,8 +226,9 @@ class FirstOrderPhysicalVerificationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ctx.exception.status_code, 403)
         self.mock_siparis_repo.create_siparis.assert_not_called()
 
-    async def test_empty_table_rejects_a_code_from_three_windows_ago(self):
-        stale = generate_dynamic_token(self.secret, time.time() - 120)
+    async def test_empty_table_rejects_a_code_past_the_tolerance(self):
+        beyond = (TOTP_WINDOW_TOLERANCE + 1) * TOTP_WINDOW_SECONDS
+        stale = generate_dynamic_token(self.secret, time.time() - beyond)
         with self.assertRaises(HTTPException) as ctx:
             await self.service.create_siparis(self._order(token=stale))
 

@@ -11,6 +11,10 @@ let currentTableItems = [];
 let discountType = 'percent'; // 'percent' or 'amount'
 let discountValue = 0;
 let partialPaymentsMap = {};
+// Sipariş anında ödenmiş (POS ile hızlı ödeme veya garsonun tahsil ettiği
+// nakit) tutar. `partialPaymentsMap` yalnızca kasada alınan tahsilatları
+// tutar, bu yüzden ikisi ayrı: aynı masada her ikisi de olabilir.
+let activeMasaPaidFromOrders = 0;
 
 // GRUPLANMIŞ ADİSYON (SEÇENEK 1) & AYRINTILAR DURUMU
 let ticketViewMode = 'grouped'; // 'grouped' veya 'batches'
@@ -477,6 +481,7 @@ function renderActiveTicketWorkstation() {
     }
 
     currentTableItems = [];
+    activeMasaPaidFromOrders = 0;
     let grandTotalSum = 0;
     let alreadyPaidSum = 0;
 
@@ -577,6 +582,12 @@ function renderActiveTicketWorkstation() {
                     ara_toplam: grp.toplam_ara,
                     unpaid_adet: grp.unpaid_adet,
                     paid_adet: grp.paid_adet,
+                    // Satırın kasada tahsil edilebilir kısmı. Aynı üründen
+                    // bir kısmı önceden ödenmiş olabilir (müşteri 2 adedi
+                    // kartla ödeyip 4 adet daha söylediğinde satır 6 adet
+                    // gösterir); seçim yapıldığında yalnızca açık adetler
+                    // tahsil edilmelidir.
+                    acik_tutar: (grp.unpaid_adet || 0) * (parseFloat(grp.birim_fiyat) || 0),
                     selected: wasSelected,
                     isIkram: wasIkram,
                     isFullyPaid: isFullyPaid
@@ -585,6 +596,8 @@ function renderActiveTicketWorkstation() {
 
                 const lineTotal = parseFloat(grp.toplam_ara) || 0;
                 const paidLineSum = (grp.paid_adet || 0) * (parseFloat(grp.birim_fiyat) || 0);
+                const openLineTotal = itemObj.acik_tutar;
+                const isPartiallyPaid = (grp.paid_adet > 0 && grp.unpaid_adet > 0);
 
                 if (!wasIkram) {
                     grandTotalSum += lineTotal;
@@ -633,10 +646,13 @@ function renderActiveTicketWorkstation() {
                         ? `<span style="background:rgba(16,185,129,0.2); color:#34d399; border:1px solid rgba(16,185,129,0.4); padding:3px 8px; border-radius:6px; font-size:0.8rem; font-weight:800;">✅ ÖDENDİ</span>`
                         : (wasIkram
                             ? `<span style="background:rgba(239,68,68,0.2); color:#f87171; padding:2px 6px; border-radius:4px; font-weight:800; font-size:0.75rem;">🎁 İKRAM</span>`
-                            : `<span style="color:#64748b;">-</span>`)}
+                            : (isPartiallyPaid
+                                ? `<span style="background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.4); padding:3px 8px; border-radius:6px; font-size:0.72rem; font-weight:800; white-space:nowrap;">✅ ${grp.paid_adet} ÖDENDİ · ⏳ ${grp.unpaid_adet} AÇIK</span>`
+                                : `<span style="color:#64748b;">-</span>`))}
                         </td>
                         <td style="text-align:right; font-weight:900; font-size:1.05rem; color:${isFullyPaid ? '#64748b' : (wasIkram ? '#f87171' : '#34d399')}; ${isFullyPaid ? 'text-decoration: line-through;' : ''}">
                             ${wasIkram ? '0.00 ₺' : `${grp.toplam_ara.toFixed(2)} ₺`}
+                            ${(!wasIkram && isPartiallyPaid) ? `<div style="font-size:0.72rem; font-weight:800; color:#38bdf8;">Kasada: ${openLineTotal.toFixed(2)} ₺</div>` : ''}
                         </td>
                     </tr>
                 `;
@@ -758,7 +774,44 @@ function renderActiveTicketWorkstation() {
         }
     }
 
+    activeMasaPaidFromOrders = alreadyPaidSum;
     updateFinancialSummary(grandTotalSum, alreadyPaidSum);
+}
+
+// Bu masa için halihazırda ödenmiş toplam: sipariş anında ödenenler + kasada
+// alınan tahsilatlar. Tahsilat yollarının hepsi bunu düşmelidir; yalnızca
+// `partialPaymentsMap` düşülürse kartla önceden ödenmiş tutar ikinci kez
+// istenir.
+function getActiveMasaPaidBefore() {
+    if (!activeMasaId) return 0;
+    return activeMasaPaidFromOrders + (parseFloat(partialPaymentsMap[activeMasaId]) || 0);
+}
+
+function calculateDiscountFor(subtotal) {
+    if (!(subtotal > 0) || !(discountValue > 0)) return 0;
+    return discountType === 'percent'
+        ? (subtotal * discountValue) / 100
+        : Math.min(subtotal, discountValue);
+}
+
+// Kasada tahsil edilecek kalan borç.
+function getActiveMasaRemaining() {
+    const subtotal = getActiveMasaSubtotal();
+    return Math.max(0, subtotal - calculateDiscountFor(subtotal) - getActiveMasaPaidBefore());
+}
+
+// Seçili kalemlerin tahsil edilecek tutarı.
+//
+// `ara_toplam` satırın TAMAMIDIR ve önceden ödenmiş adetleri de içerir. Kalem
+// bazlı tahsilatta bu değer kullanıldığında müşteri, kartla çoktan ödediği
+// adetler için ikinci kez ödeme yapmış olurdu (85 TL'lik çorbadan 2 adet
+// kartla ödenip 4 adet daha söylendiğinde satır seçimi 340 TL yerine 510 TL
+// getiriyordu). Tahsilat yalnızca açık adetler üzerinden yapılır.
+function getSelectedItemsTotal() {
+    return currentTableItems.reduce((sum, item) => {
+        if (!item.selected || item.isIkram) return sum;
+        return sum + (parseFloat(item.acik_tutar) || 0);
+    }, 0);
 }
 
 function getActiveMasaSubtotal() {
@@ -811,12 +864,7 @@ function updateFinancialSummary(subtotal, alreadyPaidFromOrders = 0) {
     const toplamVal = Math.max(0, subtotalVal);
     const kalanVal = Math.max(0, toplamVal - calculatedDiscount - paidBefore);
 
-    let secimVal = 0;
-    currentTableItems.forEach(i => {
-        if (i.selected) {
-            secimVal += (i.isIkram ? 0 : parseFloat(i.ara_toplam) || 0);
-        }
-    });
+    const secimVal = getSelectedItemsTotal();
 
     const elToplam = document.getElementById('valToplam');
     const elDiscount = document.getElementById('valDiscount');
@@ -869,14 +917,7 @@ function showPaymentFeedback(amount, paymentMethod) {
 }
 
 window.updateDualPaymentSum = function () {
-    const subtotal = getActiveMasaSubtotal();
-    const paidBefore = activeMasaId ? (parseFloat(partialPaymentsMap[activeMasaId]) || 0) : 0;
-
-    let calculatedDiscount = 0;
-    if (discountValue > 0) {
-        calculatedDiscount = discountType === 'percent' ? (subtotal * discountValue) / 100 : Math.min(subtotal, discountValue);
-    }
-    const remainingTotal = Math.max(0, subtotal - calculatedDiscount - paidBefore);
+    const remainingTotal = getActiveMasaRemaining();
 
     const nakit = parseFloat(document.getElementById('tutarNakitInput')?.value) || 0;
     const kart = parseFloat(document.getElementById('tutarKartInput')?.value) || 0;
@@ -888,12 +929,7 @@ window.updateDualPaymentSum = function () {
             if (remainingTotal <= 0.05) {
                 displaySum = 0;
             } else {
-                let secimVal = 0;
-                currentTableItems.forEach(i => {
-                    if (i.selected) {
-                        secimVal += (i.isIkram ? 0 : parseFloat(i.ara_toplam) || 0);
-                    }
-                });
+                const secimVal = getSelectedItemsTotal();
                 displaySum = secimVal > 0 ? secimVal : remainingTotal;
             }
         }
@@ -944,26 +980,14 @@ function updateQuickButtonHighlights(activeType) {
 window.fillDualAmount = function (type) {
     if (!activeMasaId) return;
 
-    const subtotal = getActiveMasaSubtotal();
-    const paidBefore = parseFloat(partialPaymentsMap[activeMasaId]) || 0;
-
-    let calculatedDiscount = 0;
-    if (discountValue > 0) {
-        calculatedDiscount = discountType === 'percent' ? (subtotal * discountValue) / 100 : Math.min(subtotal, discountValue);
-    }
-    const remainingTotal = Math.max(0, subtotal - calculatedDiscount - paidBefore);
+    const remainingTotal = getActiveMasaRemaining();
 
     if (remainingTotal <= 0.05 && type !== 'clear') {
         showKasaToast("⚠️ Masanın borcu zaten ödenmiştir.");
         return;
     }
 
-    let secimVal = 0;
-    currentTableItems.forEach(i => {
-        if (i.selected) {
-            secimVal += (i.isIkram ? 0 : parseFloat(i.ara_toplam) || 0);
-        }
-    });
+    const secimVal = getSelectedItemsTotal();
 
     const fullTarget = (secimVal > 0 && remainingTotal > 0.05) ? secimVal : remainingTotal;
     const halfTarget = fullTarget / 2;
@@ -1031,26 +1055,14 @@ window.processQuickPayment = async function (paymentMethod) {
     if (!table) return;
 
     const subtotal = getActiveMasaSubtotal();
-    const paidBefore = activeMasaId ? (parseFloat(partialPaymentsMap[activeMasaId]) || 0) : 0;
-
-    let calculatedDiscount = 0;
-    if (discountValue > 0) {
-        calculatedDiscount = discountType === 'percent' ? (subtotal * discountValue) / 100 : Math.min(subtotal, discountValue);
-    }
-
-    const remaining = Math.max(0, subtotal - calculatedDiscount - paidBefore);
+    const remaining = getActiveMasaRemaining();
 
     if (remaining <= 0 && subtotal === 0) {
         appAlert("Bu masada ödenecek adisyon tutarı bulunmuyor.");
         return;
     }
 
-    let selectedItemsSum = 0;
-    const selectedItems = currentTableItems.filter(i => i.selected);
-    if (selectedItems.length > 0) {
-        selectedItemsSum = selectedItems.reduce((sum, i) => sum + (i.isIkram ? 0 : parseFloat(i.ara_toplam) || 0), 0);
-    }
-
+    const selectedItemsSum = getSelectedItemsTotal();
     const payAmount = selectedItemsSum > 0 ? selectedItemsSum : remaining;
 
     let confirmMsg = `${getFormattedMasaNo(table.masa_no)} için `;
@@ -1083,7 +1095,7 @@ window.processQuickPayment = async function (paymentMethod) {
 
     currentTableItems.forEach(i => i.selected = false);
 
-    const updatedRemaining = Math.max(0, subtotal - calculatedDiscount - partialPaymentsMap[activeMasaId]);
+    const updatedRemaining = getActiveMasaRemaining();
 
     if (updatedRemaining <= 0.05) {
         try {
@@ -1119,13 +1131,8 @@ window.processMainPaymentSubmit = function () {
     if (!table) return;
 
     const subtotal = getActiveMasaSubtotal();
-    const paidBefore = parseFloat(partialPaymentsMap[activeMasaId]) || 0;
-
-    let calculatedDiscount = 0;
-    if (discountValue > 0) {
-        calculatedDiscount = discountType === 'percent' ? (subtotal * discountValue) / 100 : Math.min(subtotal, discountValue);
-    }
-    const remaining = Math.max(0, subtotal - calculatedDiscount - paidBefore);
+    const calculatedDiscount = calculateDiscountFor(subtotal);
+    const remaining = getActiveMasaRemaining();
 
     if (remaining <= 0.05) {
         showKasaToast("⚠️ Bu masanın hesabı zaten tamamen ödenmiştir (Kalan: 0.00 ₺). Masayı kapatabilir veya F8 ile fiş yazdırabilirsiniz.");
@@ -1136,12 +1143,7 @@ window.processMainPaymentSubmit = function () {
     let kartPay = parseFloat(document.getElementById('tutarKartInput')?.value) || 0;
 
     if (nakitPay === 0 && kartPay === 0) {
-        let secimVal = 0;
-        currentTableItems.forEach(i => {
-            if (i.selected) {
-                secimVal += (i.isIkram ? 0 : parseFloat(i.ara_toplam) || 0);
-            }
-        });
+        const secimVal = getSelectedItemsTotal();
         const targetAmount = secimVal > 0 ? secimVal : remaining;
 
         if (targetAmount <= 0) {
@@ -1220,7 +1222,7 @@ window.executeConfirmedMainPayment = async function (shouldPrintAndClose = false
 
     showPaymentFeedback(totalInputPayment, paymentLabel);
 
-    const updatedRemaining = Math.max(0, subtotal - calculatedDiscount - partialPaymentsMap[activeMasaId]);
+    const updatedRemaining = getActiveMasaRemaining();
 
     if (shouldPrintAndClose) {
         printReceiptPreview();
@@ -1481,6 +1483,27 @@ window.printReceiptPreview = function () {
             <span>GENEL TOPLAM:</span>
             <span>${grandTotal.toFixed(2)} TL</span>
         </div>
+    `;
+
+    // Fiş "genel toplam"ı adisyonun tamamıdır. Masanın bir kısmı önceden
+    // ödenmişse (kartla hızlı ödeme veya kasada alınan parçalı tahsilat) fişte
+    // yalnızca bu rakam görünürse müşteriden ödediği tutar tekrar istenmiş
+    // olur; ödenen ve kalan ayrı satır olarak yazılır.
+    const receiptPaidBefore = getActiveMasaPaidBefore();
+    if (receiptPaidBefore > 0.005) {
+        html += `
+            <div style="display:flex; justify-content:space-between; color:#047857;">
+                <span>Önceden Ödenen:</span>
+                <span>-${receiptPaidBefore.toFixed(2)} TL</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-weight:bold; font-size:1.05rem; border-top:1px solid #000; padding-top:4px;">
+                <span>KALAN ÖDENECEK:</span>
+                <span>${Math.max(0, grandTotal - receiptPaidBefore).toFixed(2)} TL</span>
+            </div>
+        `;
+    }
+
+    html += `
         <div style="border-bottom:1px dashed #000; margin:12px 0 8px 0;"></div>
         <div style="text-align:center; font-size:0.75rem;">Bizi Tercih Ettiğiniz İçin Teşekkür Ederiz!<br>Afiyet Olsun.</div>
     `;

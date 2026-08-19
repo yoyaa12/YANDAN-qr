@@ -1984,3 +1984,477 @@ is really a malformed request. The limits now come from the live schema.
 #### Next action
 
 - Add a `MasaTahsilatlari` persistence/summing test across a table close.
+
+---
+
+### 2026-08-17 - Manual test round: waiter save button, cancel stock restitution, page caching, stale customer stock, line-quantity cap
+
+#### Summary
+
+Four defects found during a manual test round were fixed. The waiter's
+"Değişiklikleri Kaydet" button did nothing at all, every time, without a
+message. Cancelling an order never returned its quantities to stock. HTML pages
+were served cacheable, so a phone could keep running an old script version. The
+customer menu's stock figures were loaded once and never refreshed, producing
+warnings that contradicted the admin panel. A per-line quantity cap was added
+against the "order the maximum of everything" nuisance, at the user's request.
+
+#### Files created
+
+- `tests/test_cancel_restores_stock.py` - 10 tests.
+- `tests/test_page_cache_headers.py` - 3 tests.
+- `tests/frontend/panel_ux_contract.test.cjs` - 8 tests.
+
+#### Files modified
+
+- `static/js/waiter.js`
+  - **Root cause of the dead save button.** The table-detail "Düzenle" button
+    ran `closeMasaDetailModal(); openEditOrderModalForTable(masaId)`, and
+    `closeMasaDetailModal` sets `activeGarson = null`. `saveEditedOrder` then
+    hit `if (!activeGarson) return;` and aborted silently - deterministically,
+    on every single edit. The other detail-modal buttons were unaffected
+    because they perform their action *before* closing.
+  - Added `hideMasaDetailModal()`, which only removes the `active` class, and
+    pointed the edit button at it. `closeMasaDetailModal` keeps its original
+    meaning for every other caller.
+  - Removed the `!activeGarson` guard from `saveEditedOrder`: the audit name
+    now comes from the token server-side, so the identity is not a
+    precondition. Gave the remaining early return a visible message.
+  - Dropped `garson_adi` from the edit payload; the server ignores it.
+- `app/services/siparis_service.py`
+  - `update_siparis_durumu` now returns every line to stock when an order moves
+    to `iptal`. `restore_stock` was previously reachable only from the edit
+    path, so a cancelled order's deduction was permanent: cancelling a 20-unit
+    troll order did not give those 20 units back.
+  - Cancellation is terminal in the state machine, so restitution cannot run
+    twice; a zero-quantity line is skipped.
+- `app/schemas/orders.py`
+  - Added `MAX_LINE_QUANTITY = 50` and `adet: int = Field(gt=0, le=...)`.
+    Chosen well above any realistic single-line order at one table and far
+    below the point where a line total overflows `decimal(10,2)`.
+- `app/api/views.py`
+  - Added `html_page()`, which serves every page with
+    `Cache-Control: no-store, no-cache, must-revalidate, max-age=0` plus
+    `Pragma`/`Expires`. The HTML carries the versioned script tag, so a cached
+    page keeps requesting the old script and client fixes never reach a device
+    that has visited before. Static assets keep their normal caching.
+- `static/js/app.js`
+  - Added `refreshStockQuietly()`: re-reads `/api/urunler` and updates only the
+    `stok_miktari` fields in place, without re-rendering, so the menu does not
+    shift under a scrolling customer. Called after a successful order and on a
+    60-second timer, because other tables consume stock too and a customer only
+    receives their own table's events.
+- `templates/menu.html`, `templates/garson.html`
+  - `app.js?v=84` -> `?v=85`, `waiter.js?v=78` -> `?v=79`.
+
+#### Files deleted
+
+- None.
+
+#### Database / migrations
+
+- None.
+
+#### API changes
+
+- `POST /api/siparisler` and `PUT /api/siparisler/{id}` reject a line quantity
+  above 50 with `422`.
+- All HTML page responses carry no-store cache headers. Route paths, request
+  bodies and response shapes are unchanged.
+
+#### Authentication / authorization changes
+
+- None. Removing the client-side `activeGarson` guard does not weaken anything:
+  the route already requires an `admin`/`garson` token and the audit name is
+  taken from that token, never from the request.
+
+#### Tests added or modified
+
+- 13 new Python tests (184 -> 197) and 8 new frontend tests (34 -> 42).
+
+#### Tests executed
+
+- `python -m unittest discover -s tests`.
+- `node --test "tests/frontend/**/*.test.cjs"`, `node --check` on both changed
+  scripts.
+- Mutation runs: the edit button reverted to `closeMasaDetailModal()`; the
+  cancellation branch disabled with `if False`. Both restored afterwards.
+
+#### Test results
+
+- Python suite: 197/197 PASSED.
+- Frontend suite: 42/42 PASSED; `node --check` PASSED.
+- Mutation run: 1 frontend test FAILED (edit button) and 1 Python test FAILED
+  (cancel restitution), confirming both new suites detect their defect.
+
+#### Verification performed
+
+- Traced the dead button from the inline `onclick` through
+  `closeMasaDetailModal` to the silent `return`, and confirmed the other
+  detail-modal buttons call their action before closing.
+- Confirmed Pydantic ignores the now-removed `garson_adi` extra field, ruling
+  it out as a cause before looking further.
+- Confirmed the "10 vs 16 vs 20" report was three separate things: `max="20"`
+  on the quantity input, a stale client-side stock snapshot, and the real
+  value. No overselling was possible - the server check is authoritative.
+
+#### Security impact
+
+- The line-quantity cap plus stock restitution on cancellation together
+  neutralise the reported nuisance: a single request can no longer claim an
+  unbounded quantity, and cancelling a bogus order now actually frees the
+  stock it held.
+- No-store page headers remove a class of "the fix is deployed but the device
+  still runs the old client" failures, which matters because several client
+  behaviours are part of the security flow (the session-recovery path).
+
+#### Architectural decisions
+
+- A button must never fail silently. The `!activeGarson` guard was removed
+  rather than given a message, because the condition is no longer meaningful
+  after the server took over the audit name.
+- Stock is refreshed in place instead of re-rendering, so correctness of the
+  displayed figure does not cost the customer their scroll position.
+- The quantity cap sits in the DTO rather than the service, so it applies to
+  every path that accepts order lines and appears in the OpenAPI schema.
+
+#### Known issues / unfinished work
+
+- Stock is still deducted when the order is created, before the kitchen accepts
+  it (option C from the discussion). The user chose A and B; C remains open as
+  a business decision.
+- The admin panel still has no realtime connection and needs a manual refresh.
+  Explicitly descoped by the user.
+- One manual observation is still unexplained: the security-code screen
+  appeared for one table and not another on a `garson_kasada` order. Expected
+  behaviour is that the code is required only when the table is `bos`; the
+  table that did not ask was most likely already `dolu`. Not reproduced.
+
+#### Next action
+
+- Re-run the manual test round against these fixes, in particular the waiter
+  edit-and-save flow and cancel-then-check-stock.
+
+---
+
+### 2026-08-17 - TOTP tolerance narrowed to one window; the auto-submitted QR code documented
+
+#### Summary
+
+A manual observation - "the security code is sometimes requested and sometimes
+not, on tables where a session is opened for the first time" - was investigated
+and an earlier explanation given to the user (that the table must have been
+`dolu`) was **wrong**. The real cause: the client keeps the code from the QR
+URL and attaches it to the first order automatically, so whether the code screen
+appears depends only on how much time passed between scanning and ordering.
+
+That makes the TOTP tolerance the true maximum age of the physical-presence
+proof. It was ±2 windows, i.e. up to 89 seconds. At the user's request it is now
+±1, i.e. up to 59 seconds. The behaviour is now documented and pinned by tests
+instead of being incidental.
+
+#### Files created
+
+- None.
+
+#### Files modified
+
+- `app/core/totp_service.py`
+  - Added `TOTP_WINDOW_SECONDS = 30` and `TOTP_WINDOW_TOLERANCE = 1`, and
+    replaced the hard-coded `30`s and the literal
+    `[C, C-1, C+1, C-2, C+2]` window list with a loop built from the tolerance.
+  - The replay-cache cleanup keeps `TOTP_WINDOW_TOLERANCE + 1` windows, so a
+    replay record is never dropped while its token could still be accepted.
+  - Docstrings corrected: they claimed +/-1 and +/-2 tolerance and "30 second"
+    validity, which never matched the measured behaviour.
+- `tests/test_first_order_physical_verification.py`
+  - The tolerance tests are now driven by the constant rather than by hard-coded
+    offsets, so they cannot silently drift from the implementation.
+  - Added `test_a_scanned_code_stays_usable_for_under_a_minute`, which pins the
+    measured lifetime at both ends of a window (59 s when scanned at the start,
+    30 s at the end) and asserts rejection one second later.
+- `tests/frontend/customer_session_recovery.test.cjs`
+  - Three tests pinning the client contract that produces the observed
+    behaviour: the QR code is retained, attached to the first order
+    automatically, and discarded once spent.
+- `docs/PROJE_MIMARI_SUNUM.md`
+  - Corrected the tolerance in §7.2 and the sequence diagram.
+  - New §7.2.1 "Neden bazen kod soruyor, bazen sormuyor?" with a flow diagram
+    and a timing table, since this will be asked during the demo.
+- `docs/IMPLEMENTATION_STATUS.md`
+  - MEDIUM finding 2 (TOTP wider than documented) marked remediated with the
+    reason it mattered.
+
+#### Files deleted
+
+- None.
+
+#### Database / migrations
+
+- None.
+
+#### API changes
+
+- None in shape. `POST /api/masalar/{id}/verify-qr` and the first-order check in
+  `POST /api/siparisler` now reject a code older than roughly one minute rather
+  than roughly a minute and a half.
+
+#### Authentication / authorization changes
+
+- The physical-presence proof required by the BOS -> DOLU rule is now at most
+  59 seconds old instead of 89. Nothing else about the rule changed.
+
+#### Tests added or modified
+
+- 1 new Python test and 3 new frontend tests (Python 197 -> 198,
+  frontend 42 -> 45). Two existing tolerance tests were rewritten to derive
+  their expectations from the constant.
+
+#### Tests executed
+
+- `python -m unittest discover -s tests`.
+- `node --test "tests/frontend/**/*.test.cjs"`.
+- A direct measurement against the real functions: a code scanned at the start,
+  middle and end of a window was probed second by second to find its last
+  accepted moment, before and after the change.
+- Mutation run: `TOTP_WINDOW_TOLERANCE` set back to 2; restored afterwards.
+
+#### Test results
+
+- Python suite: 198/198 PASSED.
+- Frontend suite: 45/45 PASSED.
+- Measurement before the change: 89 / 74 / 60 seconds. After: 59 / 44 / 30.
+- Mutation run: 2 tests FAILED, confirming the tolerance is pinned and cannot be
+  widened unnoticed.
+
+#### Verification performed
+
+- Traced the code path that produces the reported behaviour:
+  `app.js` stores `tokenParam` into `state.currentTotpToken` on load, attaches
+  it as `current_totp_token` on the first order, and clears it after success.
+- Confirmed the earlier "the table was already `dolu`" explanation was wrong;
+  the user's tables were `bos` and they verified it with SQL.
+
+#### Security impact
+
+- Narrows the window in which somebody who scans a table's QR and walks away
+  can still place the first order remotely, from about 90 seconds to about 60.
+- No new exposure. The code is still verified server-side and still consumed on
+  first use.
+
+#### Architectural decisions
+
+- The tolerance is one constant applied to every caller (`verify-qr` and the
+  first-order check) rather than a per-call parameter. Scanning is effectively
+  instantaneous, so a single value keeps the rule explainable: "the proof may
+  be at most one minute old".
+- Client behaviour that produces a user-visible rule is pinned by contract
+  tests. It previously worked by accident; nothing recorded that the QR code
+  was meant to be auto-submitted.
+
+#### Known issues / unfinished work
+
+- A customer who takes longer than a minute to order now sees the code screen
+  more often than before. This is the intended trade-off of the narrower
+  tolerance; the screen recovers the flow without losing the cart.
+
+#### Next action
+
+- Re-run the manual round: scan and order immediately (no code screen), then
+  scan and wait two minutes before ordering (code screen appears).
+
+---
+
+### 2026-08-19 - Stok rezervasyonu iadesi, canlı stok yayını, garson servis listesi ve kısmi ödenmiş kalem tahsilatı
+
+#### Summary
+
+Kullanıcının manuel test turunda bildirdiği davranışlar düzeltildi. Çoğu aynı
+aileden: ekrandaki sayı gerçeği yansıtmıyordu.
+
+1. **Stok, teslim edilmeden kalıcı olarak eksiliyordu.** Stok sipariş anında
+   düşülüyor (bu bilinçli bir rezervasyon: yan masa, henüz mutfağa gitmemiş
+   adetleri müsait sanmamalı) ama iade yalnızca `iptal` yolunda vardı. Müşteri
+   çorbası gelmeden kalkarsa ya da kasa masayı zorla kapatırsa
+   `clear_active_orders_for_masa` siparişleri `odendi_kapatildi` yapıyor,
+   `iptal` yapmıyordu; yani hiç servis edilmemiş ürün stoktan kalıcı olarak
+   düşmüş kalıyor ve bir daha satılamıyordu. Artık adisyon kapanırken teslim
+   edilmemiş kalemler stoğa geri döner.
+2. **"Son X Adet" uyarısı canlı değildi.** Menü verisi sayfa açılışında ve 60
+   saniyelik sessiz tazelemede okunuyordu, bu yüzden yan masanın siparişi bu
+   ekrana bir dakikaya kadar yansımıyordu. Yeni `stok_guncellendi` soket olayı
+   stok her değiştiğinde güncel adedi yayınlar.
+3. **Müşteri stoğun üzerinde adet seçebiliyordu.** Modalde 20'ye kadar
+   çıkılabiliyor, hata ancak sipariş gönderildikten sonra dönüyordu. Artık
+   seçilebilen en yüksek değer stoğun kendisidir; "+" sınırda durur, elle
+   yazılan değer en yüksek geçerli değere çekilir ve kalan stok söylenir.
+4. **Garson paneli masanın tüm adisyonunu gösteriyordu.** Masa 5 çorba alıp
+   teslim aldıktan sonra 1 çorba daha söylediğinde garson "6x Yayla Çorbası"
+   görüyor ve 6 tabak taşıması gerektiğini sanıyordu. Kalemler artık fiş
+   bazında ve yalnızca teslim edilmemiş siparişler için listelenir.
+5. **Kasada kısmi ödenmiş satırın seçimi ödenmiş adetleri de tahsil
+   ediyordu.** 85 TL değerindeki çorbadan 2 adet kartla ödenip 4 adet daha
+   söylendiğinde satır 6 adet gösteriyor; kalem seçimi 340 TL yerine 510 TL
+   getiriyordu. Aynı hata seçim yapılmadan "kalan borcu tahsil et" yolunda da
+   vardı: kalan borç yalnızca kasada alınan tahsilatları düşüyor, sipariş
+   anında kartla ödenmiş tutarı düşmüyordu.
+6. **Uzun toast bildirimi kapsülünün dışına taşıyordu** (`white-space: nowrap`
+   ve `width: fit-content` birlikte).
+
+#### Files created
+
+- `tests/test_undelivered_stock_release.py`
+- `tests/frontend/stock_and_billing_contract.test.cjs`
+
+#### Files modified
+
+- `app/repositories/siparis_repo.py` - `get_undelivered_details_for_masa()`
+  eklendi. Masadaki `teslim_edildi` / `iptal` / `odendi_kapatildi` olmayan
+  siparişlerin kalemlerini ürün bazında toplar. Üç durum da bilinçli olarak
+  dışarıda: teslim edilen tüketilmiştir, iptal iadesini kendi yolunda yapmıştır,
+  `odendi_kapatildi` ise iadenin daha önce çalıştığı anlamına gelir - böylece
+  aynı masa iki kez kapatılsa da stok bir kez geri verilir.
+- `app/services/siparis_service.py` - `_restore_undelivered_stock()` ve
+  `_publish_stock_changed()` eklendi. `_close_masa_session()` artık iadeyi
+  siparişlerin durumu ezilmeden ÖNCE yapar ve stoğu değişen ürün kimliklerini
+  döner; `clear_masa`, `update_siparis_durumu` (iptal ve kendiliğinden boşalma),
+  `create_siparis` ve `update_siparis_items` commit sonrası `stok_guncellendi`
+  yayınlar.
+- `app/core/socket_manager.py` - `stok_guncellendi` aboneliği. Yayın oda ayrımı
+  yapmaz: stok adedi kimlik gerektirmeyen `GET /api/urunler` üzerinden zaten
+  herkese açık ve masa odasında olmayan (henüz QR okutmamış) müşterinin menüsü
+  de canlı kalmalı.
+- `app/services/urun_service.py` - `update_urun` async oldu ve stok değişince
+  `stok_guncellendi` yayınlıyor; admin stoğu elle değiştirdiğinde açık
+  menülerdeki rozet de anında güncelleniyor.
+- `app/api/v1/endpoints/admin.py` - `await service.update_urun(...)`.
+- `static/js/app.js` - `applyStockSnapshot` ve `rerenderProductCard` ile canlı
+  stok; `getProductStock`, `getCartQuantityFor`, `getModalMaxQuantity`,
+  `syncModalQuantityLimit`, `clampModalQuantity` ile adet sınırı; sepet
+  ekranındaki artı düğmesi de aynı sınıra tabi; garson onaylı sipariş mesajı
+  kısaltıldı.
+- `templates/menu.html` - adet alanı `readonly` değil, yazılan değer
+  `clampModalQuantity()` ile sınırlanıyor. `app.js?v=86`, `style.css?v=73`.
+- `static/css/style.css` - `.toast-notification` artık satır kırıyor
+  (`white-space: normal`, `overflow-wrap: anywhere`).
+- `static/js/waiter.js` - `openMasaDetail` kalemleri fiş bazında ve yalnızca
+  `teslim_edildi` olmayan siparişler için listeliyor; her fişte durum rozeti
+  (`getWaiterOrderStatusLabel`); daha önce teslim edilmiş ürün sayısı tek
+  satırlık bilgi notu olarak duruyor. `renderWaiterDashboard` içindeki
+  kullanılmayan `combined_items` toplaması kaldırıldı.
+- `templates/garson.html` - `waiter.js?v=80`, `style.css?v=5`.
+- `static/js/kasa.js` - Gruplanmış satıra `acik_tutar` (ödenmemiş adet çarpı
+  birim fiyat) eklendi. Beş ayrı yere kopyalanmış seçim toplamı tek
+  `getSelectedItemsTotal()` yardımcısına indirildi ve `ara_toplam` yerine
+  `acik_tutar` üzerinden hesaplıyor. `getActiveMasaPaidBefore()`,
+  `getActiveMasaRemaining()` ve `calculateDiscountFor()` eklendi; tüm tahsilat
+  yolları sipariş anında ödenmiş tutarı da düşüyor. Kısmi ödenmiş satır
+  "2 ÖDENDİ / 4 AÇIK" rozeti ve "Kasada: X ₺" satırı gösteriyor. Fişe
+  "Önceden Ödenen" ve "KALAN ÖDENECEK" satırları eklendi.
+- `templates/kasa.html` - `kasa.js?v=63`, `style.css?v=23`.
+- `templates/admin.html` - `style.css?v=1000`.
+
+#### Files deleted
+
+- None
+
+#### Database changes
+
+- None. Şema değişmedi; `get_undelivered_details_for_masa` mevcut `Siparisler`
+  ve `SiparisDetaylari` tablolarını okuyor.
+
+#### Migration requirements
+
+- None.
+
+#### API changes
+
+- `PUT /api/admin/urunler/{urun_id}` artık servis katmanında async çalışıyor;
+  request/response sözleşmesi değişmedi.
+- Yeni soket olayı: `stok_guncellendi` -> `{"stoklar": [{"urun_id": int,
+  "stok_miktari": int}]}`. Tüm bağlı istemcilere gider.
+
+#### Authentication changes
+
+- None.
+
+#### Authorization changes
+
+- None. `stok_guncellendi` yalnızca zaten public olan stok adedini taşır;
+  sipariş, tutar veya ödeme durumu içermez.
+
+#### Test changes
+
+- `tests/test_undelivered_stock_release.py`: 13 yeni Python testi. Sorgunun
+  hangi durumları dışarıda bıraktığı, iadenin kapatmadan ÖNCE yapılması, çift
+  kapatmada stok yaratılmaması, teslim edilmiş kalemin iade edilmemesi ve
+  yayının commit sonrası gerçek stok değerini taşıması.
+- `tests/frontend/stock_and_billing_contract.test.cjs`: 23 yeni frontend
+  testi. Adet sınırı ve kasa seçim toplamı kaynaktan sökülüp `vm` içinde
+  gerçekten çalıştırılıyor, yani aritmetik test ediliyor; "kaynakta şu ifade var
+  mı" kontrolü değil.
+
+#### Tests executed
+
+- `python -m unittest discover -s tests`
+- `node --test "tests/frontend/**/*.test.cjs"`
+- Mutation run: (a) `_close_masa_session` içinde iade tekrar kapatmadan SONRAYA
+  alındı, (b) `getSelectedItemsTotal` tekrar `ara_toplam` toplamaya döndürüldü.
+
+#### Test results
+
+- Python: **211/211 PASSED** (198 -> 211).
+- Frontend: **68/68 PASSED** (45 -> 68).
+- Mutation run: (a) `test_the_release_happens_before_the_orders_are_marked_closed`
+  FAILED, (b) `selecting a partly paid line charges only the open quantities`
+  FAILED. Her iki koruma da gerçekten sabitlenmiş; kaynaklar sonra geri alındı
+  ve tüm suite yeniden yeşil.
+
+#### Verification performed
+
+- Bildirilen davranışların her biri koda kadar izlendi:
+  `clear_active_orders_for_masa` `odendi_kapatildi` yazıyor ve `iptal`
+  yazmadığı için iade yoluna hiç girmiyordu; `openMasaDetail` masanın tüm
+  aktif siparişlerini tek `combinedItems` sözlüğünde topluyordu; kasadaki
+  gruplanmış satırın `ara_toplam` alanı ödenmiş adetleri de içeriyor ve beş
+  ayrı tahsilat yolu bu alanı topluyordu.
+- Ekran görüntüsündeki rakamlar doğrulandı: Toplam 510, Ödenen 170, Kalan 340
+  doğru; hatalı olan yalnızca "Seçilen Tutar: 510".
+
+#### Security impact
+
+- Küçük ama yönü olumlu: müşteri artık stoğun üzerinde adet gönderemiyor
+  (sunucu doğrulaması aynen duruyor, bu yalnızca arayüz tarafı) ve kasa aynı
+  adedi ikinci kez tahsil etmiyor.
+- `stok_guncellendi` yayını yeni bilgi sızdırmıyor: aynı veri `GET /api/urunler`
+  ile kimliksiz okunabiliyor.
+
+#### Architectural decisions
+
+- **Stok modeli açıkça "sipariş anında rezerve, teslimatta tüket" olarak
+  sabitlendi.** IMPLEMENTATION_STATUS içindeki 5b maddesinin (stok mutfak
+  kabulünde mi düşülmeli?) cevabı budur ve kullanıcı kararıdır: rezervasyon
+  davranışı korunur çünkü yan masanın ekranında adedin düşmesi doğrudur;
+  kalıcı tüketim ise yalnızca `teslim_edildi` ile gerçekleşir.
+- İade `_close_masa_session` içinde, yani masayı `bos` yapan HER İKİ yolda da
+  (kasanın temizlemesi ve kendiliğinden boşalma) çalışır. Adisyon sınırı bu
+  projede zaten burada tanımlı.
+- Kasa tarafında beş kopya toplama tek yardımcıya indirildi. Kopyalar aynı
+  hatayı beş yerde barındırıyordu; test, kopyanın geri gelmesini de kontrol
+  ediyor.
+
+#### Unresolved issues
+
+- Rezervasyonun bir ömrü yok: masası hiç kapatılmayan, teslim de edilmeyen bir
+  sipariş stoğu süresiz tutar. Bugünkü akışta masa er ya da geç kapandığı için
+  pratik bir sorun değil, ama zaman aşımlı rezervasyon ayrı bir karar.
+- `printReceiptPreview` "Önceden Ödenen" satırını `getActiveMasaPaidBefore()`
+  üzerinden yazıyor; bu değer `MasaTahsilatlari` toplamı ile sipariş anındaki
+  ödemelerin toplamı. Hangi tutarın hangi yöntemle alındığına dair kalem dökümü
+  hâlâ yok.
+
+#### Next action
+
+- Gerçek veri üzerinde manuel tur: masa 1'den garson onaylı 1 çorba gönder,
+  yan masada stoğun canlı düştüğünü gör, masa 1'i kasadan zorla kapat ve
+  `Urunler.stok_miktari` değerinin geri yükseldiğini SQL ile doğrula.

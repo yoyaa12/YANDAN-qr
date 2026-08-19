@@ -2887,11 +2887,18 @@ body.vega-kasa-body {
     border: 1px solid rgba(239, 68, 68, 0.6);
     color: #fca5a5;
     padding: 8px 18px;
-    border-radius: 100px;
+    border-radius: 18px;
     font-weight: 800;
     font-size: 0.82rem;
     z-index: 999999;
-    white-space: nowrap;
+    /* `nowrap` + `width: fit-content` uzun mesajı kapsülün dışına taşırıyordu:
+       metin sığmadığı halde satır kırılmadığı için kenarlığın dışına akıyordu.
+       Sarma açık, satır yüksekliği ve kelime kırma ile birlikte kapsül metnin
+       etrafında büyür. Kısa mesajlar `fit-content` sayesinde hâlâ hap
+       görünümünde kalır. */
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.35;
     text-align: center;
     pointer-events: none;
     user-select: none;

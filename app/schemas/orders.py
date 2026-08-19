@@ -5,9 +5,17 @@ from pydantic import BaseModel, Field, field_validator
 from app.enums import OrderAction, OrderStatus, PaymentMethod, PaymentStatus
 
 
+# Tek sipariş kaleminde izin verilen en yüksek adet. Gerçek bir masanın tek
+# kalemde isteyebileceğinin çok üzerinde, ama "her üründen maksimum adet
+# gönderip tüm stoğu kilitleme" denemesini ve `decimal(10,2)` satır toplamının
+# taşmasını engelleyecek kadar düşük. Müşteri arayüzü zaten tek seferde en fazla
+# 20 adet eklettiriyor (templates/menu.html `max="20"`).
+MAX_LINE_QUANTITY = 50
+
+
 class SiparisItemModel(BaseModel):
     urun_id: int = Field(gt=0)
-    adet: int = Field(gt=0)
+    adet: int = Field(gt=0, le=MAX_LINE_QUANTITY)
     birim_fiyat: float = Field(ge=0)
     urun_notu: Optional[str] = Field(default="", max_length=255)
 

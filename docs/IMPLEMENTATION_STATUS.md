@@ -1,6 +1,6 @@
 # Implementation Status
 
-Last updated: 2026-08-17 +03:00
+Last updated: 2026-08-19 +03:00
 
 ## Overall status
 
@@ -638,7 +638,13 @@ Open findings raised today:
 ### MEDIUM
 
 1. TOTP replay protection and table/socket state are process-local.
-2. TOTP accepts current +/- two 30-second windows, wider than documented.
+2. **REMEDIATED 2026-08-17.** TOTP accepted the current +/- two 30-second
+   windows, wider than documented. The tolerance is now a named constant
+   `TOTP_WINDOW_TOLERANCE = 1` in `app/core/totp_service.py`, so a scanned code
+   lives 30-59 seconds instead of 60-89. This matters more than it looks: the
+   client stores the code from the QR URL and attaches it to the first order
+   automatically, so the tolerance *is* the maximum age of the physical-presence
+   proof. Covered by a lifetime test that fails if the constant moves.
 3. **REMEDIATED 2026-08-17.** Delivered orders were still returned as active
    because the repository excludes only `iptal` and `odendi_kapatildi`. The
    query is unchanged, but a table that empties now closes its orders out to
@@ -891,12 +897,12 @@ and known limits.
 
 ### 2026-08-17
 
-- `python -m unittest discover -s tests` -> **184 tests, OK** (125 before this
+- `python -m unittest discover -s tests` -> **198 tests, OK** (125 before this
   pass; 149 after the verification suites, 160 after the stock-oversell fix,
   171 after the check-boundary work, 184 after the catalog limits, with 2
   tautological tests removed).
   Executed with the repository `.venv` interpreter.
-- `node --test "tests/frontend/**/*.test.cjs"` -> **34 tests** (27 before).
+- `node --test "tests/frontend/**/*.test.cjs"` -> **45 tests** (27 before).
 - Added `tests/test_stock_oversell_guard.py` (11 tests): the repository uses the
   conditional query and reports its row count, `db_transaction` rolls back on a
   raised exception and commits otherwise, a lost race returns 409 on both the
@@ -977,6 +983,26 @@ and known limits.
    `totp_service._used_tokens` and `BROWSING_TABLES` are lost on restart and
    unshared across workers. Persisting them requires new tables.
 
+6. **Stock lifecycle decision:** RESOLVED 2026-08-19 by the user, and
+   implemented. The rule is now explicit and has one name in the code:
+
+   > Stock is **reserved** when the order is created and **consumed** when the
+   > order reaches `teslim_edildi`.
+
+   Reservation at creation time is deliberate and stays: a neighbouring table
+   must not see quantities that another table has already claimed. What was
+   missing was the release. `clear_active_orders_for_masa` marks open orders
+   `odendi_kapatildi`, not `iptal`, and only the `iptal` path restored stock -
+   so a customer who left before the food arrived, or a table force-closed at
+   the till, permanently destroyed inventory that was never served.
+   `_close_masa_session` now restores every still-undelivered line first, on
+   both routes that empty a table.
+
+   Not decided, and deliberately left open: reservations have no expiry. An
+   order on a table that is never closed and never delivered holds its stock
+   forever. Harmless in the current flow because tables do get closed, but a
+   timeout would need its own decision.
+
 ---
 
 ## Exact next action
@@ -987,8 +1013,21 @@ and known limits.
    DONE 2026-08-17.
 4. ~~Add `max_length` to the catalog request models~~ - DONE 2026-08-17.
 5. Add a `MasaTahsilatlari` persistence/summing test across a table close.
+5b. ~~Decide when stock is deducted (option C from the 2026-08-17 discussion)~~ -
+   DECIDED and DONE 2026-08-19: reserve on create, consume on delivery, release
+   the undelivered remainder when the check closes. See blocker 6 above and the
+   2026-08-19 changelog entry.
+5c. ~~Live stock in the customer menu; quantity cannot exceed stock; waiter
+   panel shows the receipt to carry, not the table total; cashier item
+   selection charges only unpaid quantities~~ - DONE 2026-08-19.
 6. Then finish Milestone 9: application-wide XSS regression and manual
    direct-HTTP verification against a non-production dataset.
+7. Manual round for the 2026-08-19 batch, on a test dataset: send one
+   waiter-approved soup from table 1, watch the "Son X Adet" badge drop live on
+   a second table's menu, force-close table 1 at the till and confirm with SQL
+   that `Urunler.stok_miktari` went back up by exactly the undelivered
+   quantity. Then repeat with the order marked `teslim_edildi` first - stock
+   must NOT come back.
 
 Future work, not scheduled: introduce a real `MasaOturumlari` (check) entity
 with `Siparisler.oturum_id` and `CustomerSessions.oturum_id`. The check boundary

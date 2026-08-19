@@ -108,6 +108,47 @@ test('the customer page loads a bumped app.js so the recovery flow reaches phone
     assert.ok(Number(match[1]) >= 84, 'the asset version must be bumped for the recovery flow');
 });
 
+// QR'daki kod istemcide saklanıp ilk siparişte otomatik gönderiliyor. Bu, "kod
+// bazen soruluyor bazen sorulmuyor" davranışının tek sebebi: kod hâlâ
+// geçerliyse ekran hiç çıkmıyor, eskimişse 403 gelip çıkıyor. Tesadüfen böyle
+// çalışmasın diye sözleşme burada sabitleniyor.
+
+test('the code from the QR link is kept for the first order', () => {
+    const initBody = appSource.slice(0, appSource.indexOf('async function loadMenuData'));
+
+    assert.match(
+        initBody,
+        /state\.currentTotpToken\s*=\s*tokenParam/,
+        'the code in the QR URL must be retained for the first order'
+    );
+});
+
+test('the retained code is attached to the order automatically', () => {
+    const submitBody = appSource.slice(
+        appSource.indexOf('async function executeOrderSubmit'),
+        appSource.indexOf('function openFirstOrderPINModal')
+    );
+
+    assert.match(
+        submitBody,
+        /payload\.current_totp_token\s*=\s*state\.currentTotpToken/,
+        'a customer who orders straight after scanning must not be asked to retype the code'
+    );
+});
+
+test('the code is discarded once it has been spent', () => {
+    const submitBody = appSource.slice(
+        appSource.indexOf('async function executeOrderSubmit'),
+        appSource.indexOf('function openFirstOrderPINModal')
+    );
+
+    assert.match(
+        submitBody,
+        /state\.currentTotpToken\s*=\s*null/,
+        'the server marks the code used; keeping it client-side would resend a dead code'
+    );
+});
+
 test('app.js parses as a script', () => {
     assert.doesNotThrow(() => new vm.Script(appSource, { filename: 'app.js' }));
 });

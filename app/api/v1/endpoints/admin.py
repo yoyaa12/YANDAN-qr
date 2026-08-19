@@ -19,7 +19,7 @@ async def add_urun(data: UrunEkleModel, service: UrunService = Depends()):
 
 @router.put("/admin/urunler/{urun_id}", response_model=AdminIslemResponse)
 async def update_urun(urun_id: int, data: UrunGuncelleModel, service: UrunService = Depends()):
-    service.update_urun(urun_id, data)
+    await service.update_urun(urun_id, data)
     return AdminIslemResponse(status="success", message="Ürün bilgileri güncellendi.")
 
 @router.delete("/admin/urunler/{urun_id}", response_model=AdminIslemResponse)

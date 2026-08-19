@@ -28,7 +28,7 @@ Rakamlarla mevcut sistem (canlı veritabanından okundu):
 | Kayıtlı sipariş / sipariş kalemi | 180 / 178 |
 | Personel hesabı | 8 (3 rol + admin) |
 | HTTP endpoint | 34 operasyon (22'si kimlik doğrulama zorunlu) |
-| Otomatik test | 184 Python + 34 Node = **218 test, tamamı geçiyor** |
+| Otomatik test | 198 Python + 45 Node = **243 test, tamamı geçiyor** |
 | Backend kod | ~3.900 satır Python |
 
 **Projenin ayırt edici tarafı**, klasik bir CRUD menü uygulaması olmamasıdır:
@@ -432,7 +432,7 @@ sequenceDiagram
     API-->>E: 6 haneli kod + kalan saniye
     Note over E: QR 30 saniyede bir yenilenir
     M->>API: POST /api/masalar/5/verify-qr {token, device_id}
-    API->>API: HMAC-SHA256 doğrulama (±2 pencere)
+    API->>API: HMAC-SHA256 doğrulama (±1 pencere)
     API->>DB: INSERT CustomerSessions (SHA-256 özeti, 90 dk)
     API-->>M: {valid: true, session_token: "a1b2..."}
     M->>API: POST /api/siparisler + Bearer a1b2...
@@ -445,17 +445,50 @@ sequenceDiagram
 sunucu ile ekran aynı anahtardan aynı kodu bağımsız olarak üretir, kod hiçbir
 zaman ağ üzerinden dağıtılmaz.
 
-- **Tolerans:** mevcut pencere ± 2 (yaklaşık ±60 saniye). Telefon/sunucu saat
-  farkı ve kullanıcının yazma süresi için gerekli.
+- **Tolerans:** mevcut pencere **± 1** (`TOTP_WINDOW_TOLERANCE`). Bir kod
+  okutulduktan sonra **30-59 saniye** yaşar; aradaki fark, QR'ın 30 saniyelik
+  pencerenin neresinde okutulduğuna bağlıdır.
 - **Replay koruması:** doğrulanan `(masa, kod, pencere)` üçlüsü işaretlenir,
   ikinci kez kullanılamaz.
-- **Kaba kuvvet koruması:** 6 hane + aynı anda 5 geçerli pencere = teorik olarak
+- **Kaba kuvvet koruması:** 6 hane + aynı anda 3 geçerli pencere = teorik olarak
   kırılabilir bir alan. Bu yüzden `/verify-qr` ucu IP + masa bazlı
   **10 başarısız deneme / 60 saniye** sınırına tabidir → HTTP 429.
 
 **Oturum token'ı:** `secrets.token_hex(32)` (256 bit entropi, tahmin edilemez),
 veritabanında yalnızca SHA-256 özeti, 90 dakika ömür, `is_active` ile iptal
 edilebilir, `masa_id`'ye bağlı.
+
+### 7.2.1 "Neden bazen kod soruyor, bazen sormuyor?"
+
+Demoda kesin sorulacak soru. Cevap: **hiç sormaması normal, sorması da normal.**
+
+QR'ı okuttuğunda adres `/menu?masa=5&token=123456` şeklinde gelir. İstemci bu
+kodu saklar ([app.js](../static/js/app.js)) ve **ilk siparişte otomatik olarak**
+isteğe ekler. Yani kodu müşteri yazmaz, QR taşır.
+
+```mermaid
+flowchart LR
+    A["QR okut<br/>kod URL'de gelir"] --> B["Kod istemcide saklanır"]
+    B --> C{"İlk sipariş<br/>ne zaman verildi?"}
+    C -->|"< ~30 sn"| D["Kod hâlâ geçerli<br/>→ ekran hiç çıkmaz"]
+    C -->|"> ~60 sn"| E["Kod eskidi → 403<br/>→ 6 haneli kod ekranı"]
+    E --> F["Müşteri masadaki<br/>güncel kodu yazar"]
+    F --> D
+```
+
+Belirleyici olan **masa durumu veya ödeme yöntemi değil**, QR'ı okutmakla
+siparişi vermek arasında geçen süredir:
+
+| Süre | Davranış |
+|---|---|
+| 30 saniyeden az | Kod sorulmaz |
+| 30-59 saniye | Kodun pencerenin neresinde üretildiğine göre değişir |
+| 60 saniyeden fazla | Kod sorulur |
+
+Güvenlik açısından fark yok: kod her iki durumda da sunucuda doğrulanır, sadece
+elle yazılmak yerine otomatik taşınır. Kanıtın "tazeliği" tolerans kadardır —
+bu yüzden tolerans **±2'den ±1'e indirildi**: fiziksel varlık kanıtı artık en
+fazla 59 saniye eski olabiliyor (önceden 89 saniyeye kadar çıkabiliyordu).
 
 ### 7.3 İki token tipini ayırma
 
@@ -677,12 +710,12 @@ python -m unittest discover -s tests -v
 node --test "tests/frontend/**/*.test.cjs"
 ```
 
-- **184 Python testi** — token doğrulama (eksik/geçersiz/süresi dolmuş/yanlış
+- **198 Python testi** — token doğrulama (eksik/geçersiz/süresi dolmuş/yanlış
   tip), rol matrisi, durum makinesi, yetkili fiyatlandırma, stok yarışı,
   idempotency, BOŞ→DOLU fiziksel doğrulama, TOTP pencere/replay, adisyon
   kapanışı ve oturum iptali, kayan oturum ömrü, masa sahipliği (IDOR),
   Socket.IO oda izolasyonu, QR hız sınırı, repository SQL parametreleri.
-- **34 Node testi** — XSS kaçış (escape) sözleşmeleri, panel script'lerinin
+- **45 Node testi** — XSS kaçış (escape) sözleşmeleri, panel script'lerinin
   token göndermesi, müşteri oturumu kurtarma akışı, native `alert/confirm`
   kullanılmaması, UI kuralları.
 - **Bağımlılık yok**: `unittest` + Node yerleşik test koşucusu. `pytest` ve

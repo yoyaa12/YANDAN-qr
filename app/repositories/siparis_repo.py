@@ -110,6 +110,36 @@ class SiparisRepository:
         )
         return res['cnt'] if res else 0
 
+    def get_undelivered_details_for_masa(self, masa_id: int) -> List[Dict]:
+        """Masada teslim edilmemiş kalemlerin ürün bazında toplam adedi.
+
+        Stok sipariş anında düşülür: bu bir rezervasyondur, tüketim değil. Ürün
+        gerçekten `teslim_edildi` olduğunda rezervasyon tüketime dönüşür.
+        Adisyon kapanırken hâlâ teslim edilmemiş olan kalemler ise hiç
+        servis edilmemiştir ve stoğa geri dönmelidir.
+
+        `iptal` ve `odendi_kapatildi` bilinçli olarak dışarıda: iptal kendi
+        iadesini zaten yapmıştır, `odendi_kapatildi` ise bu iadenin daha önce
+        çalıştığı anlamına gelir. Böylece aynı masa iki kez kapatılsa da stok
+        yalnızca bir kez geri verilir.
+        """
+        query = """
+            SELECT sd.urun_id, SUM(sd.adet) AS adet
+            FROM SiparisDetaylari sd
+            JOIN Siparisler s ON sd.siparis_id = s.id
+            WHERE s.masa_id = ? AND s.siparis_durumu NOT IN (?, ?, ?)
+            GROUP BY sd.urun_id
+        """
+        return self.db.execute_query(
+            query,
+            (
+                masa_id,
+                OrderStatus.DELIVERED.value,
+                OrderStatus.CANCELLED.value,
+                OrderStatus.PAID_CLOSED.value,
+            ),
+        ) or []
+
     def clear_active_orders_for_masa(self, masa_id: int):
         query = "UPDATE Siparisler SET siparis_durumu = ?, odeme_durumu = ? WHERE masa_id = ? AND siparis_durumu NOT IN (?, ?)"
         self.db.execute_non_query(
