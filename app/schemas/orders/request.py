@@ -1,8 +1,15 @@
+"""Sipariş uçlarının kabul ettiği istek gövdeleri.
+
+Bu dosyadaki modellerin ortak ilkesi: istemci **ne istediğini** söyleyebilir,
+**ne ödeyeceğini** veya **kim olduğunu** söyleyemez. Fiyat servis katmanında
+katalogdan yeniden hesaplanır, kimlik ise doğrulanmış token'dan okunur.
+"""
+
 from typing import List, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.enums import OrderAction, OrderStatus, PaymentMethod, PaymentStatus
+from app.enums import OrderAction, OrderStatus, PaymentMethod
 
 
 # Tek sipariş kaleminde izin verilen en yüksek adet. Gerçek bir masanın tek
@@ -14,6 +21,14 @@ MAX_LINE_QUANTITY = 50
 
 
 class SiparisItemModel(BaseModel):
+    """Sepetteki tek kalem.
+
+    `birim_fiyat` yalnızca istemcinin iddiasıdır: sunucu bunu
+    `SiparisService._price_items_authoritatively` içinde `Urunler` tablosundan
+    gelen fiyatla değiştirir. Alanın tutulmasının tek nedeni, katalog fiyatının
+    altında bir iddianın kurcalama sinyali olarak reddedilebilmesidir.
+    """
+
     urun_id: int = Field(gt=0)
     adet: int = Field(gt=0, le=MAX_LINE_QUANTITY)
     birim_fiyat: float = Field(ge=0)
@@ -21,6 +36,13 @@ class SiparisItemModel(BaseModel):
 
 
 class SiparisOlusturModel(BaseModel):
+    """`POST /api/siparisler` gövdesi.
+
+    `customer_session_id` alanı bilinçli olarak yoktur: siparişin sahibi
+    controller tarafından doğrulanmış oturumdan yazılır, istemci "bu sipariş şu
+    kişinin" diye bir iddiada bulunamaz.
+    """
+
     masa_id: int = Field(gt=0)
     toplam_tutar: float = Field(ge=0)
     odeme_yontemi: PaymentMethod = PaymentMethod.POS
@@ -53,66 +75,12 @@ class DurumGuncelleModel(BaseModel):
 
     @field_validator("yeni_durum", mode="before")
     @classmethod
-    def normalize_status(cls, value):
+    def normalize_status(cls, value: object) -> object:
+        """Metin durumları normalize eder; diğer tipleri olduğu gibi geçirir.
+
+        Doğrulama işini pydantic'in enum çözümlemesine bırakır: buradaki tek iş,
+        " Hazir " gibi bir girdinin `hazir` ile eşleşmesini sağlamak.
+        """
         if isinstance(value, str):
             return value.strip().lower()
         return value
-
-
-class SiparisDetayResponse(BaseModel):
-    # `SiparisDetaylari.id`. Kasadaki "seçili ürünleri taşı" akışı kalemi tek tek
-    # adreslemek zorunda: ürün adı + adet benzersiz değil, aynı üründen iki ayrı
-    # satır olabiliyor. Sunucu yine de gönderilen her id'nin gerçekten kaynak
-    # masaya ait olduğunu doğrular; id bilmek yetki anlamına gelmez.
-    id: Optional[int] = None
-    urun_id: int
-    urun_adi: str
-    adet: int
-    birim_fiyat: float
-    urun_notu: str
-    ara_toplam: float
-
-
-class SiparisResponse(BaseModel):
-    id: int
-    masa_id: int
-    masa_no: str
-    siparis_kodu: str
-    toplam_tutar: float
-    odeme_yontemi: Optional[PaymentMethod] = None
-    odeme_durumu: PaymentStatus
-    siparis_durumu: OrderStatus
-    olusturma_tarihi: Optional[str] = None
-    garson_adi: Optional[str] = None
-    device_id: Optional[str] = None
-    # Bu siparişi isteği yapan müşteri oturumunun verip vermediği. Sunucu
-    # hesaplar; istemcinin gönderdiği hiçbir alana bakılmaz. Personel
-    # yollarında ve oturumu bilinmeyen eski kayıtlarda `None` kalır.
-    #
-    # Ham `customer_session_id` bilinçli olarak dışarı verilmez: masadaki bir
-    # müşterinin diğerlerinin oturum kimliklerini görmesi için hiçbir neden yok.
-    is_mine: Optional[bool] = None
-    detaylar: List[SiparisDetayResponse] = Field(default_factory=list)
-
-
-class SiparisDurumResponse(BaseModel):
-    siparis_id: int
-    masa_id: int
-    masa_no: str
-    yeni_durum: OrderStatus
-    odeme_durumu: PaymentStatus
-    garson_adi: Optional[str] = None
-    guncelleme_tarihi: str
-    siparis: SiparisResponse
-
-
-class SiparisIslemCevapModel(BaseModel):
-    status: str
-    message: str
-    siparis: SiparisResponse
-
-
-class SiparisDurumIslemCevapModel(BaseModel):
-    status: str
-    message: str
-    data: SiparisDurumResponse

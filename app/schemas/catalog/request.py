@@ -1,3 +1,5 @@
+"""Menü yönetimi uçlarının kabul ettiği istek gövdeleri."""
+
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -5,7 +7,8 @@ from pydantic import BaseModel, Field
 
 # Limits taken from the live schema on 2026-08-17 so an over-long or over-large
 # value is rejected as HTTP 422 by validation instead of reaching SQL Server and
-# failing there as an HTTP 500. Keep these in step with the columns:
+# failing there as an HTTP 500. Keep these in step with the columns declared in
+# `app/schemas/catalog/entity.py`:
 #   Urunler.urun_adi        nvarchar(100)
 #   Urunler.aciklama        nvarchar(500)
 #   Urunler.gorsel_url      nvarchar(255)
@@ -30,6 +33,8 @@ class UrunEkleModel(BaseModel):
 
 
 class UrunGuncelleModel(BaseModel):
+    """Kısmi güncelleme: yalnızca `None` olmayan alanlar yazılır."""
+
     urun_adi: Optional[str] = Field(default=None, min_length=1, max_length=URUN_ADI_MAX)
     fiyat: Optional[float] = Field(default=None, ge=0, le=PARA_MAX)
     aciklama: Optional[str] = Field(default=None, max_length=ACIKLAMA_MAX)
@@ -38,20 +43,3 @@ class UrunGuncelleModel(BaseModel):
 
 class KategoriEkleModel(BaseModel):
     kategori_adi: str = Field(min_length=1, max_length=KATEGORI_ADI_MAX)
-
-
-class UrunResponse(BaseModel):
-    id: int
-    kategori_id: int
-    kategori_adi: Optional[str] = None
-    urun_adi: str
-    aciklama: Optional[str] = None
-    fiyat: float
-    gorsel_url: Optional[str] = None
-    stok_miktari: int
-
-
-class KategoriResponse(BaseModel):
-    id: int
-    kategori_adi: str
-    gorsel_url: Optional[str] = None

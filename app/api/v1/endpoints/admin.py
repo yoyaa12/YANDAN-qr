@@ -13,37 +13,43 @@ router = APIRouter(
 )
 
 @router.post("/admin/urunler", response_model=AdminIslemResponse)
-async def add_urun(data: UrunEkleModel, service: UrunService = Depends()):
+async def add_urun(data: UrunEkleModel, service: UrunService = Depends()) -> AdminIslemResponse:
     uid = service.add_urun(data)
     return AdminIslemResponse(status="success", id=uid)
 
 @router.put("/admin/urunler/{urun_id}", response_model=AdminIslemResponse)
-async def update_urun(urun_id: int, data: UrunGuncelleModel, service: UrunService = Depends()):
+async def update_urun(
+    urun_id: int, data: UrunGuncelleModel, service: UrunService = Depends()
+) -> AdminIslemResponse:
     await service.update_urun(urun_id, data)
     return AdminIslemResponse(status="success", message="Ürün bilgileri güncellendi.")
 
 @router.delete("/admin/urunler/{urun_id}", response_model=AdminIslemResponse)
-async def delete_urun(urun_id: int, service: UrunService = Depends()):
+async def delete_urun(urun_id: int, service: UrunService = Depends()) -> AdminIslemResponse:
     service.delete_urun(urun_id)
     return AdminIslemResponse(status="success")
 
 @router.post("/admin/kategoriler", response_model=AdminIslemResponse)
-async def add_kategori(data: KategoriEkleModel, service: KategoriService = Depends()):
+async def add_kategori(
+    data: KategoriEkleModel, service: KategoriService = Depends()
+) -> AdminIslemResponse:
     kid = service.add_kategori(data.kategori_adi)
     return AdminIslemResponse(status="success", id=kid)
 
 @router.delete("/admin/kategoriler/{kategori_id}", response_model=AdminIslemResponse)
-async def delete_kategori(kategori_id: int, service: KategoriService = Depends()):
+async def delete_kategori(
+    kategori_id: int, service: KategoriService = Depends()
+) -> AdminIslemResponse:
     service.delete_kategori(kategori_id)
     return AdminIslemResponse(status="success")
 
 @router.post("/admin/masalar", response_model=AdminIslemResponse)
-async def add_masa(data: MasaEkleModel, service: MasaService = Depends()):
+async def add_masa(data: MasaEkleModel, service: MasaService = Depends()) -> AdminIslemResponse:
     mid = service.add_masa(data)
     return AdminIslemResponse(status="success", id=mid)
 
 @router.delete("/admin/masalar/{masa_id}", response_model=AdminIslemResponse)
-async def delete_masa(masa_id: int, service: MasaService = Depends()):
+async def delete_masa(masa_id: int, service: MasaService = Depends()) -> AdminIslemResponse:
     service.delete_masa(masa_id)
     return AdminIslemResponse(status="success")
 

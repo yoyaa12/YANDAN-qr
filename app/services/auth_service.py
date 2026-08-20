@@ -17,6 +17,7 @@ from app.auth.tokens import (
 from app.enums import UserRole
 from app.repositories.auth_repo import AuthRepository
 from app.schemas.auth import GarsonPinVerifyModel, KullaniciResponse, LoginModel
+from app.schemas.common import GenelBasariliResponse
 from typing import List
 
 
@@ -171,13 +172,13 @@ class AuthService:
         garsonlar = self.repo.get_all_garsonlar()
         return [KullaniciResponse(**g) for g in garsonlar] if garsonlar else []
 
-    def ban_device(self, device_id: str):
+    def ban_device(self, device_id: str) -> GenelBasariliResponse:
         existing = self.repo.get_banned_device(device_id)
         if existing:
-            return {"status": "success", "message": "Cihaz zaten yasaklı."}
-        
+            return GenelBasariliResponse(status="success", message="Cihaz zaten yasaklı.")
+
         self.repo.ban_device(device_id)
-        return {"status": "success", "message": "Cihaz başarıyla yasaklandı."}
+        return GenelBasariliResponse(status="success", message="Cihaz başarıyla yasaklandı.")
 
     def create_customer_session(self, masa_id: int, device_id: Optional[str] = None) -> str:
         # Generate a random 64-character hex token

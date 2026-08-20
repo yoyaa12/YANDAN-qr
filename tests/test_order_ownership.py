@@ -210,11 +210,11 @@ class ActiveTableViewTests(_Base):
 
     def test_the_table_total_covers_everyone(self):
         res = self.service.get_masa_aktif_siparis(5, viewer_session_id=42)
-        self.assertEqual(res["genel_toplam"], 400.0)
+        self.assertEqual(res.genel_toplam, 400.0)
 
     def test_the_personal_total_covers_only_my_orders(self):
         res = self.service.get_masa_aktif_siparis(5, viewer_session_id=42)
-        self.assertEqual(res["benim_toplamim"], 150.0)
+        self.assertEqual(res.benim_toplamim, 150.0)
 
     def test_every_order_is_still_returned(self):
         """Kişisel görünüm bir filtredir; sunucu masanın tamamını döner.
@@ -224,22 +224,22 @@ class ActiveTableViewTests(_Base):
         """
         res = self.service.get_masa_aktif_siparis(5, viewer_session_id=42)
 
-        self.assertEqual(len(res["siparisler"]), 3)
-        self.assertEqual([o["is_mine"] for o in res["siparisler"]], [True, False, True])
+        self.assertEqual(len(res.siparisler), 3)
+        self.assertEqual([o.is_mine for o in res.siparisler], [True, False, True])
 
     def test_a_staff_read_gets_no_personal_total(self):
         res = self.service.get_masa_aktif_siparis(5)
 
-        self.assertIsNone(res["benim_toplamim"])
-        self.assertTrue(all(o["is_mine"] is None for o in res["siparisler"]))
+        self.assertIsNone(res.benim_toplamim)
+        self.assertTrue(all(o.is_mine is None for o in res.siparisler))
 
     def test_an_empty_table_reports_a_zero_personal_total(self):
         self.mock_siparis_repo.get_all_active_by_masa_id.return_value = []
 
         res = self.service.get_masa_aktif_siparis(5, viewer_session_id=42)
 
-        self.assertFalse(res["has_active"])
-        self.assertEqual(res["benim_toplamim"], 0.0)
+        self.assertFalse(res.has_active)
+        self.assertEqual(res.benim_toplamim, 0.0)
 
 
 class ResponseContractTests(unittest.TestCase):

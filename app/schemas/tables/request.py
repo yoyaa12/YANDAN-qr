@@ -1,22 +1,17 @@
+"""Masa ve QR uçlarının kabul ettiği istek gövdeleri."""
+
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
-
-from app.enums import TableStatus
 
 
 class MasaEkleModel(BaseModel):
     masa_no: str = Field(min_length=1, max_length=20)
 
 
-class MasaResponse(BaseModel):
-    id: int
-    masa_no: str
-    durum: TableStatus
-    secim_durumu: Optional[dict] = None
-
-
 class MoveMasaModel(BaseModel):
+    """Bir masanın adisyonunun tamamını başka masaya aktarma isteği."""
+
     from_masa_id: int = Field(gt=0)
     to_masa_id: int = Field(gt=0)
 
@@ -35,6 +30,8 @@ class MoveMasaItemsModel(BaseModel):
 
 
 class VerifyQRModel(BaseModel):
+    """Müşterinin QR okuttuktan sonra gönderdiği dinamik token."""
+
     token: str = Field(min_length=1, max_length=32)
     device_id: Optional[str] = Field(default=None, max_length=100)
 
@@ -48,11 +45,3 @@ class TahsilatModel(BaseModel):
 
     tutar: float = Field(gt=0)
     odeme_yontemi: str = Field(min_length=1, max_length=50)
-
-
-class QRDogrulamaResponse(BaseModel):
-    valid: bool
-    message: str
-    masa_id: Optional[int] = None
-    session_token: Optional[str] = None
-

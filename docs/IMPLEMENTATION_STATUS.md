@@ -152,12 +152,12 @@ Those residual sinks remain a HIGH open finding for a later focused batch.
 
 ### Staff login response schema TTL fix
 
-Status: VERIFIED 2026-08-17 (`app/schemas/auth.py` bounds are `le=365*24*3600`
+Status: VERIFIED 2026-08-17 (`app/schemas/auth/response.py` bounds are `le=365*24*3600`
 in both `LoginResponse` and `GarsonPinResponse`; covered by
 `test_login_and_pin_response_supports_extended_ttl`)
 
 - [x] Fixed `HTTP 500 Internal Server Error` on `/api/auth/login` and `/api/garson/verify-pin`.
-- [x] Increased upper bound for `expires_in` in `LoginResponse` and `GarsonPinResponse` (`app/schemas/auth.py`) from `le=3600` to `le=31536000` (`365 * 24 * 3600`), allowing configured staff JWT token TTLs (e.g., 30 days = `2592000` seconds).
+- [x] Increased upper bound for `expires_in` in `LoginResponse` and `GarsonPinResponse` (`app/schemas/auth/response.py`) from `le=3600` to `le=31536000` (`365 * 24 * 3600`), allowing configured staff JWT token TTLs (e.g., 30 days = `2592000` seconds).
 - [x] Added unit test `test_login_and_pin_response_supports_extended_ttl` in `tests/test_enums_and_schemas.py`.
 
 ### Kasa grid salonContainer/bahceContainer ReferenceError fix
@@ -192,12 +192,25 @@ containers with null guards; the ids match `templates/kasa.html:90,98`)
 - Business services: `app/services/`.
 - Raw-SQL repositories: `app/repositories/`.
 - Connection/transaction abstraction: `app/database.py`.
-- Request and response DTOs: `app/schemas/auth.py`, `catalog.py`, `common.py`,
-  `orders.py`, and `tables.py`; `app/schemas/schemas.py` is compatibility-only.
+- Models, split per domain under `app/schemas/` (2026-08-20). Each domain is a
+  package rather than a single module:
+    - `auth/`, `catalog/`, `orders/`, `tables/`
+    - `entity.py`   - database row shape (`TypedDict`), read by repositories
+    - `request.py`  - incoming request bodies
+    - `response.py` - outgoing response bodies
+    - `orders/dto.py` - service-to-service intermediates that never leave
+  `app/schemas/common.py` holds the two generic success responses;
+  `app/schemas/schemas.py` is compatibility-only.
 - Realtime event bus and Socket.IO adapter: `app/core/events.py` and
   `app/core/socket_manager.py`.
 - QR/TOTP implementation: `app/core/totp_service.py`.
-- No ORM or separate database/domain model classes exist.
+- No ORM. Repositories return plain `dict` rows from raw SQL; the `entity.py`
+  modules declare those row shapes as `TypedDict`, so the columns a query
+  returns are visible from the method signature without reading its SQL. This
+  is type-level documentation only - there is no runtime conversion.
+- Type coverage as of 2026-08-20: repositories 48/48 and API endpoints 28/28
+  declare return types; `tests/test_model_layer_contract.py` keeps both at
+  100% and fails if a route ships without a `response_model`.
 
 The intended controller -> service -> repository -> database flow is generally
 recognizable, but important authorization and business checks are absent from
@@ -250,7 +263,7 @@ Confirmed schema facts:
   stock, empty order item lists, arbitrary order states, and overlong values for
   the selected auth/table/order metadata fields that have explicit limits.
 - Catalog names/descriptions/image URLs carry database-aligned maximum lengths
-  as of 2026-08-17 (`app/schemas/catalog.py`).
+  as of 2026-08-17 (`app/schemas/catalog/request.py`).
 - Nonnegative client price and total fields remain in the request contract and
   are still trusted by the service; validation alone does not make them
   authoritative-safe.
@@ -527,7 +540,7 @@ Open findings raised today:
    Fix requires a row-count check plus a decision on the customer-visible
    failure (`409`), which is a business-behaviour change -> user approval.
 2. **MEDIUM - catalog request fields have no maximum length.
-   REMEDIATED 2026-08-17.** `app/schemas/catalog.py` now declares named
+   REMEDIATED 2026-08-17.** `app/schemas/catalog/request.py` now declares named
    constants taken from the live schema (`urun_adi` 100, `aciklama` 500,
    `gorsel_url` 255, `kategori_adi` 50, money `99999999.99`, stock
    `2147483647`) and applies them to `UrunEkleModel`, `UrunGuncelleModel` and

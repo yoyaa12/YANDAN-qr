@@ -1,7 +1,24 @@
-from typing import Optional, List, Dict
+"""`Siparisler`, `SiparisDetaylari` ve `MasaTahsilatlari` tablolarının veri erişimi.
+
+Satır şemaları:
+    `app/schemas/orders/entity.py` -> `SiparisEntity`, `SiparisWithMasaEntity`,
+                                      `SiparisDetayWithUrunEntity`, `UndeliveredUrunAdetRow`
+    `app/schemas/tables/entity.py` -> `MasaTahsilatEntity`
+"""
+
+from typing import List, Optional
+
 from fastapi import Depends
+
 from app.database import DatabaseSession, get_db
 from app.enums import OrderStatus, PaymentStatus
+from app.schemas.orders.dto import PricedOrderLine
+from app.schemas.orders.entity import (
+    SiparisDetayWithUrunEntity,
+    SiparisWithMasaEntity,
+    UndeliveredUrunAdetRow,
+)
+
 
 class SiparisRepository:
     def __init__(self, db: DatabaseSession = Depends(get_db)):
@@ -39,14 +56,24 @@ class SiparisRepository:
                 siparis_id = s_row['id']
         return siparis_id
 
-    def create_siparis_detay(self, siparis_id: int, urun_id: int, adet: int, birim_fiyat: float, urun_notu: str, ara_toplam: float):
+    def create_siparis_detay(
+        self,
+        siparis_id: int,
+        urun_id: int,
+        adet: int,
+        birim_fiyat: float,
+        urun_notu: str,
+        ara_toplam: float,
+    ) -> None:
         query = """
             INSERT INTO SiparisDetaylari (siparis_id, urun_id, adet, birim_fiyat, urun_notu, ara_toplam)
             VALUES (?, ?, ?, ?, ?, ?)
         """
         self.db.execute_non_query(query, (siparis_id, urun_id, adet, birim_fiyat, urun_notu, ara_toplam))
 
-    def get_all(self, durum: Optional[str] = None, masa_id: Optional[int] = None):
+    def get_all(
+        self, durum: Optional[str] = None, masa_id: Optional[int] = None
+    ) -> List[SiparisWithMasaEntity]:
         if masa_id:
             query = "SELECT s.*, m.masa_no FROM Siparisler s JOIN Masalar m ON s.masa_id = m.id WHERE s.masa_id = ? ORDER BY s.id DESC"
             return self.db.execute_query(query, (masa_id,)) or []
@@ -57,19 +84,20 @@ class SiparisRepository:
             query = "SELECT s.*, m.masa_no FROM Siparisler s JOIN Masalar m ON s.masa_id = m.id ORDER BY s.id DESC"
             return self.db.execute_query(query) or []
 
-    def get_by_id(self, siparis_id: int):
+    def get_by_id(self, siparis_id: int) -> Optional[SiparisWithMasaEntity]:
         query = "SELECT s.*, m.masa_no FROM Siparisler s JOIN Masalar m ON s.masa_id = m.id WHERE s.id = ?"
         return self.db.execute_query(query, (siparis_id,), fetch_one=True)
 
-    def get_siparis_detaylari(self, siparis_id: int):
+    def get_siparis_detaylari(self, siparis_id: int) -> List[SiparisDetayWithUrunEntity]:
         query = "SELECT sd.*, u.urun_adi FROM SiparisDetaylari sd JOIN Urunler u ON sd.urun_id = u.id WHERE sd.siparis_id = ?"
         return self.db.execute_query(query, (siparis_id,)) or []
 
-    def get_all_active_by_masa_id(self, masa_id: int):
+    def get_all_active_by_masa_id(self, masa_id: int) -> List[SiparisWithMasaEntity]:
+        """Masanın kapanmamış siparişleri (iptal ve kapatılmış olanlar hariç)."""
         query = """
-            SELECT s.*, m.masa_no 
-            FROM Siparisler s 
-            JOIN Masalar m ON s.masa_id = m.id 
+            SELECT s.*, m.masa_no
+            FROM Siparisler s
+            JOIN Masalar m ON s.masa_id = m.id
             WHERE s.masa_id = ? AND s.siparis_durumu NOT IN (?, ?)
             ORDER BY s.id ASC
         """
@@ -78,7 +106,9 @@ class SiparisRepository:
             (masa_id, OrderStatus.CANCELLED.value, OrderStatus.PAID_CLOSED.value),
         ) or []
 
-    def update_durum(self, siparis_id: int, yeni_durum: str, garson_adi: Optional[str] = None):
+    def update_durum(
+        self, siparis_id: int, yeni_durum: str, garson_adi: Optional[str] = None
+    ) -> None:
         if garson_adi:
             self.db.execute_non_query(
                 "UPDATE Siparisler SET siparis_durumu = ?, garson_adi = ? WHERE id = ?",
@@ -90,7 +120,13 @@ class SiparisRepository:
                 (yeni_durum, siparis_id)
             )
 
-    def update_odeme_and_durum(self, siparis_id: int, odeme_durumu: str, siparis_durumu: str, garson_adi: Optional[str] = None):
+    def update_odeme_and_durum(
+        self,
+        siparis_id: int,
+        odeme_durumu: str,
+        siparis_durumu: str,
+        garson_adi: Optional[str] = None,
+    ) -> None:
         if garson_adi:
             self.db.execute_non_query(
                 "UPDATE Siparisler SET odeme_durumu = ?, siparis_durumu = ?, garson_adi = ? WHERE id = ?",
@@ -130,7 +166,7 @@ class SiparisRepository:
         )
         return res['cnt'] if res else 0
 
-    def get_undelivered_details_for_masa(self, masa_id: int) -> List[Dict]:
+    def get_undelivered_details_for_masa(self, masa_id: int) -> List[UndeliveredUrunAdetRow]:
         """Masada teslim edilmemiş kalemlerin ürün bazında toplam adedi.
 
         Stok sipariş anında düşülür: bu bir rezervasyondur, tüketim değil. Ürün
@@ -160,7 +196,7 @@ class SiparisRepository:
             ),
         ) or []
 
-    def clear_active_orders_for_masa(self, masa_id: int):
+    def clear_active_orders_for_masa(self, masa_id: int) -> None:
         query = "UPDATE Siparisler SET siparis_durumu = ?, odeme_durumu = ? WHERE masa_id = ? AND siparis_durumu NOT IN (?, ?)"
         self.db.execute_non_query(
             query,
@@ -177,9 +213,9 @@ class SiparisRepository:
         self,
         siparis_id: int,
         toplam_tutar: float,
-        priced_items: List[Dict],
+        priced_items: List[PricedOrderLine],
         garson_adi: Optional[str] = None,
-    ):
+    ) -> None:
         """Replace an order's lines with server-priced ones.
 
         ``priced_items`` carries unit prices and line totals already computed by
@@ -203,7 +239,7 @@ class SiparisRepository:
                 line["ara_toplam"],
             )
 
-    def get_movable_detail_rows(self, masa_id: int) -> List[Dict]:
+    def get_movable_detail_rows(self, masa_id: int) -> List[SiparisDetayWithUrunEntity]:
         """Masanın taşınabilir sipariş kalemleri, satır kimliğiyle birlikte.
 
         Kapsam bilinçli olarak `move_orders_between_masalar` ile aynı: iptal ve
@@ -253,10 +289,10 @@ class SiparisRepository:
         """
         self.db.execute_non_query(query, (siparis_id, siparis_id))
 
-    def move_orders_between_masalar(self, from_masa_id: int, to_masa_id: int):
+    def move_orders_between_masalar(self, from_masa_id: int, to_masa_id: int) -> None:
         query = """
-            UPDATE Siparisler 
-            SET masa_id = ? 
+            UPDATE Siparisler
+            SET masa_id = ?
             WHERE masa_id = ? AND siparis_durumu NOT IN (?, ?)
         """
         self.db.execute_non_query(
@@ -269,7 +305,8 @@ class SiparisRepository:
             ),
         )
 
-    def add_masa_tahsilat(self, masa_id: int, tutar: float, odeme_yontemi: str):
+    def add_masa_tahsilat(self, masa_id: int, tutar: float, odeme_yontemi: str) -> None:
+        """Kısmi ödemeyi açık (`is_closed = 0`) satır olarak yazar."""
         query = """
             INSERT INTO MasaTahsilatlari (masa_id, tutar, odeme_yontemi, is_closed)
             VALUES (?, ?, ?, 0)
@@ -281,6 +318,7 @@ class SiparisRepository:
         res = self.db.execute_query(query, (masa_id,), fetch_one=True)
         return float(res['toplam']) if res and res['toplam'] else 0.0
 
-    def close_tahsilatlar_for_masa(self, masa_id: int):
+    def close_tahsilatlar_for_masa(self, masa_id: int) -> None:
+        """Adisyon kapanınca tahsilat satırları silinmez, kapatılır."""
         query = "UPDATE MasaTahsilatlari SET is_closed = 1 WHERE masa_id = ? AND is_closed = 0"
         self.db.execute_non_query(query, (masa_id,))

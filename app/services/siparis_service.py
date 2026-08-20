@@ -2,7 +2,7 @@ import uuid
 import datetime
 import time
 from fastapi import Depends, HTTPException
-from typing import Optional, List
+from typing import Dict, List, Optional
 
 from app.core.events import event_bus
 from app.core.socket_manager import clear_browsing_table
@@ -14,7 +14,14 @@ from app.repositories.masa_repo import MasaRepository
 from app.repositories.urun_repo import UrunRepository
 from app.repositories.auth_repo import AuthRepository
 from app.schemas.orders import DurumGuncelleModel, SiparisDuzenleModel, SiparisOlusturModel
-from app.schemas.orders import SiparisDurumResponse, SiparisResponse
+from app.schemas.orders import (
+    MasaAktifSiparisResponse,
+    SiparisDurumResponse,
+    SiparisResponse,
+)
+from app.schemas.common import GenelBasariliResponse
+from app.schemas.orders.dto import MasaTasimaSonucu, PricedOrderLine
+from app.schemas.orders.entity import SiparisWithMasaEntity
 from app.services.order_authorization import enforce_order_status_role, validate_order_state_transition
 from app.database import db_transaction
 
@@ -63,7 +70,7 @@ class SiparisService:
         self.urun_repo = urun_repo
         self.auth_repo = auth_repo
 
-    def _determine_initial_status(self, odeme_yontemi: PaymentMethod):
+    def _determine_initial_status(self, odeme_yontemi: PaymentMethod) -> tuple[str, str]:
         odeme_durumu = (
             PaymentStatus.PAID.value
             if odeme_yontemi == PaymentMethod.POS
@@ -131,14 +138,14 @@ class SiparisService:
         urunler: list,
         *,
         reject_underpriced_claim: bool = True,
-    ) -> tuple[List[dict], float]:
+    ) -> tuple[List[PricedOrderLine], float]:
         """Resolve, validate and price every line against the database.
 
         Each product is read exactly once. Unit prices come from ``Urunler`` and
         the order total is the sum of the recomputed lines, so neither
         ``birim_fiyat`` nor ``toplam_tutar`` from the request is ever trusted.
         """
-        priced: List[dict] = []
+        priced: List[PricedOrderLine] = []
         order_total = 0.0
 
         for item in urunler:
@@ -168,7 +175,7 @@ class SiparisService:
 
     @staticmethod
     def _assert_stock_available(
-        priced: List[dict],
+        priced: List[PricedOrderLine],
         already_reserved: Optional[dict] = None,
     ) -> None:
         """Reject lines that exceed available stock.
@@ -272,7 +279,7 @@ class SiparisService:
         if stoklar:
             await event_bus.publish("stok_guncellendi", {"stoklar": stoklar})
 
-    def _persist_order_items(self, siparis_id: int, priced: List[dict]) -> List[dict]:
+    def _persist_order_items(self, siparis_id: int, priced: List[PricedOrderLine]) -> List[dict]:
         """Write the priced lines and take their quantities out of stock."""
         detaylar = []
         for line in priced:
@@ -288,7 +295,9 @@ class SiparisService:
             detaylar.append({k: v for k, v in line.items() if not k.startswith("_")})
         return detaylar
 
-    async def _publish_order_events(self, data: SiparisOlusturModel, siparis_id: int, masa_no: str, order_dict: dict):
+    async def _publish_order_events(
+        self, data: SiparisOlusturModel, siparis_id: int, masa_no: str, order_dict: dict
+    ) -> None:
         if data.odeme_yontemi == PaymentMethod.POS:
             await event_bus.publish("yeni_siparis", order_dict)
 
@@ -422,16 +431,31 @@ class SiparisService:
 
     def _map_to_siparis_response(
         self,
-        order_dict: dict,
+        order_row: SiparisWithMasaEntity,
         viewer_session_id: Optional[int] = None,
     ) -> SiparisResponse:
-        order_dict['detaylar'] = self.siparis_repo.get_siparis_detaylari(order_dict['id'])
-        for d in order_dict['detaylar']:
+        """Veritabanı satırını dışarı verilebilir yanıt nesnesine çevirir.
+
+        Satırın kendisi değiştirilmez: yanıt için ayrı bir sözlük kurulur.
+        Entity içeri, response dışarı bakar ve ikisinin karışmaması,
+        `customer_session_id` gibi alanların yanlışlıkla dışarı sızmamasını
+        sağlar (`SiparisResponse` böyle bir alan tanımlamaz, pydantic de
+        tanımsız alanları eler).
+        """
+        detaylar = self.siparis_repo.get_siparis_detaylari(order_row['id'])
+        for d in detaylar:
             d['urun_notu'] = d.get('urun_notu') or ""
-        
-        if isinstance(order_dict.get('olusturma_tarihi'), datetime.datetime):
-            order_dict['olusturma_tarihi'] = order_dict['olusturma_tarihi'].strftime("%H:%M:%S")
-            
+
+        olusturma_tarihi = order_row.get('olusturma_tarihi')
+        if isinstance(olusturma_tarihi, datetime.datetime):
+            olusturma_tarihi = olusturma_tarihi.strftime("%H:%M:%S")
+
+        payload: dict = {
+            **order_row,
+            'detaylar': detaylar,
+            'olusturma_tarihi': olusturma_tarihi,
+        }
+
         # "Benim siparişim mi" kararı burada, veritabanındaki oturum kimliği ile
         # verilir. İstemci yalnızca token gönderir; hangi oturuma ait olduğu
         # sunucuda çözülür, bu yüzden bir cihaz başkasının siparişini kendi
@@ -440,18 +464,20 @@ class SiparisService:
         # `viewer_session_id` yoksa (personel yolları) alan None bırakılır:
         # "hayır" değil, "bu soru sorulmadı".
         if viewer_session_id is not None:
-            kayitli = order_dict.get('customer_session_id')
-            order_dict['is_mine'] = (
+            kayitli = order_row.get('customer_session_id')
+            payload['is_mine'] = (
                 kayitli is not None and int(kayitli) == int(viewer_session_id)
             )
 
-        return SiparisResponse.model_validate(order_dict)
+        return SiparisResponse.model_validate(payload)
 
     def get_siparisler(self, durum: Optional[str] = None, masa_id: Optional[int] = None) -> List[SiparisResponse]:
         siparisler = self.siparis_repo.get_all(durum, masa_id)
         return [self._map_to_siparis_response(s) for s in siparisler]
 
-    def get_masa_aktif_siparis(self, masa_id: int, viewer_session_id: Optional[int] = None):
+    def get_masa_aktif_siparis(
+        self, masa_id: int, viewer_session_id: Optional[int] = None
+    ) -> MasaAktifSiparisResponse:
         """Masanın açık adisyonu.
 
         Yanıt her zaman masanın TAMAMINI içerir: ödenecek tutar masanın
@@ -468,37 +494,35 @@ class SiparisService:
 
         siparisler = self.siparis_repo.get_all_active_by_masa_id(target_masa_id)
         alinan_tutar = self.siparis_repo.get_masa_tahsilat_toplami(target_masa_id)
-        if siparisler:
-            s_dtos = [
-                self._map_to_siparis_response(s, viewer_session_id=viewer_session_id)
-                for s in siparisler
-            ]
-            genel_toplam = sum(s.toplam_tutar for s in s_dtos if s.toplam_tutar)
-            benim_toplamim = sum(
-                s.toplam_tutar for s in s_dtos if s.is_mine and s.toplam_tutar
-            )
-            res = {
-                "has_active": True,
-                "siparisler": [s.model_dump(mode="json") for s in s_dtos],
-                "siparis": s_dtos[-1].model_dump(mode="json"),
-                "genel_toplam": genel_toplam,
-                "benim_toplamim": benim_toplamim if viewer_session_id is not None else None,
-                "alinan_tutar": alinan_tutar
-            }
-        else:
-            res = {
-                "has_active": False,
-                "siparisler": [],
-                "siparis": None,
-                "genel_toplam": 0.0,
-                "benim_toplamim": 0.0 if viewer_session_id is not None else None,
-                "alinan_tutar": alinan_tutar,
-            }
+
+        s_dtos = [
+            self._map_to_siparis_response(s, viewer_session_id=viewer_session_id)
+            for s in siparisler
+        ]
+        genel_toplam = sum(s.toplam_tutar for s in s_dtos if s.toplam_tutar)
+        benim_toplamim = sum(
+            s.toplam_tutar for s in s_dtos if s.is_mine and s.toplam_tutar
+        )
+
+        res = MasaAktifSiparisResponse(
+            has_active=bool(s_dtos),
+            siparisler=s_dtos,
+            # Geriye dönük uyumluluk: eski istemciler tek siparişi bu alandan
+            # okuyor. Masanın son siparişidir, listenin tamamı `siparisler`de.
+            siparis=s_dtos[-1] if s_dtos else None,
+            genel_toplam=genel_toplam,
+            benim_toplamim=benim_toplamim if viewer_session_id is not None else None,
+            alinan_tutar=alinan_tutar,
+        )
 
         if is_redirected:
             t_table = self.masa_repo.get_by_id(target_masa_id)
-            res["redirect_masa_id"] = target_masa_id
-            res["redirect_masa_no"] = t_table.get("masa_no", f"Masa {target_masa_id}") if t_table else f"Masa {target_masa_id}"
+            res.redirect_masa_id = target_masa_id
+            res.redirect_masa_no = (
+                t_table.get("masa_no", f"Masa {target_masa_id}")
+                if t_table
+                else f"Masa {target_masa_id}"
+            )
         return res
 
     async def update_siparis_durumu(
@@ -636,7 +660,7 @@ class SiparisService:
                 TABLE_MOVES_MAP.pop(k, None)
         return restored
 
-    async def clear_masa(self, masa_id: int):
+    async def clear_masa(self, masa_id: int) -> None:
         with db_transaction():
             self.masa_repo.update_durum(masa_id, TableStatus.EMPTY.value)
             stok_degisen_urunler = self._close_masa_session(masa_id)
@@ -726,7 +750,7 @@ class SiparisService:
         await self._publish_stock_changed(set(already_reserved) | set(requested))
         return s_dto
 
-    async def move_masa(self, from_masa_id: int, to_masa_id: int):
+    async def move_masa(self, from_masa_id: int, to_masa_id: int) -> None:
         with db_transaction():
             self.siparis_repo.move_orders_between_masalar(from_masa_id, to_masa_id)
             from_masa = self.masa_repo.get_by_id(from_masa_id)
@@ -755,7 +779,7 @@ class SiparisService:
 
     async def move_masa_items(
         self, from_masa_id: int, to_masa_id: int, detay_ids: List[int]
-    ):
+    ) -> MasaTasimaSonucu:
         """Adisyonun seçilen kalemlerini başka bir masaya aktarır.
 
         Kasadaki "Seçili Ürünleri Taşı" sekmesi bugüne kadar bir yanılsamaydı:
@@ -853,17 +877,19 @@ class SiparisService:
         await event_bus.publish("durum_guncellendi", {"masa_id": to_masa_id})
         return {"moved_detail_count": len(unique_ids), "full_move": False}
 
-    def get_all_masa_tahsilatlari(self) -> dict:
+    def get_all_masa_tahsilatlari(self) -> Dict[str, float]:
         """Aktif tahsilat toplamlarını masa id'sine göre döner."""
         return {
             str(masa["id"]): self.siparis_repo.get_masa_tahsilat_toplami(masa["id"])
             for masa in self.masa_repo.get_all()
         }
 
-    async def add_tahsilat(self, masa_id: int, tutar: float, odeme_yontemi: str):
+    async def add_tahsilat(
+        self, masa_id: int, tutar: float, odeme_yontemi: str
+    ) -> GenelBasariliResponse:
         with db_transaction():
             self.siparis_repo.add_masa_tahsilat(masa_id, tutar, odeme_yontemi)
             
         event_payload = {"masa_id": masa_id}
         await event_bus.publish("durum_guncellendi", event_payload)
-        return {"status": "success", "message": "Tahsilat eklendi."}
+        return GenelBasariliResponse(status="success", message="Tahsilat eklendi.")

@@ -2917,3 +2917,133 @@ alıyor.
   siparişini, "Masanın Tümü" ve adisyon toplamı ikisini birden göstermeli.
   Ardından SQL ile iki `Siparisler` satırının farklı `customer_session_id`
   taşıdığını doğrula.
+
+---
+
+### 2026-08-20 - Model katmanı ayrımı: entity / dto / request / response
+
+#### Summary
+
+Mentor geri bildiriminin kalan maddeleri uygulandı. Şema modülleri alan bazlı
+paketlere bölündü ve her alan `entity.py` (veritabanı satırı), `request.py`
+(istemciden gelen gövde), `response.py` (istemciye dönen gövde) dosyalarına
+ayrıldı; sipariş alanında ayrıca `dto.py` (servisler arası ara nesneler) var.
+Projede ORM olmadığı için entity'ler `TypedDict` olarak yazıldı: çalışma
+zamanında repository yine düz `dict` döner, dolayısıyla hiçbir davranış
+değişmez, ama sorgunun hangi kolonları getirdiği artık SQL metnini okumadan
+görülebiliyor. Repository ve controller katmanlarındaki tüm dönüş tipleri
+deklare edildi, `response_model` deklare etmeyen dört uç kapatıldı.
+
+Ayrım noktası bilinçli: entity `sifre_hash`, `totp_secret`,
+`customer_session_id` taşır; karşılık gelen response modelleri taşımaz.
+
+#### Files created
+
+- `app/schemas/auth/{__init__,entity,request,response}.py`
+- `app/schemas/catalog/{__init__,entity,request,response}.py`
+- `app/schemas/orders/{__init__,entity,dto,request,response}.py`
+- `app/schemas/tables/{__init__,entity,request,response}.py`
+- `tests/test_model_layer_contract.py`
+
+#### Files modified
+
+- `app/repositories/*.py` (5 dosya)
+  - Her metoda dönüş tipi eklendi (10/48 -> 48/48); tipler entity'lere işaret
+    ediyor. Sorgu metinleri ve davranış değişmedi.
+- `app/api/v1/endpoints/*.py` (6 dosya)
+  - Her uca dönüş tipi eklendi (0/28 -> 28/28).
+  - `masalar.py`: dört uca `response_model` eklendi (aktif-siparis,
+    all-dynamic-qrs, all-tahsilatlar, dynamic-qr).
+- `app/services/siparis_service.py`
+  - `get_masa_aktif_siparis` artık sözlük yerine `MasaAktifSiparisResponse`
+    döner. JSON gövdesi birebir aynı (test ile sabitlendi).
+  - `_map_to_siparis_response` girdi satırını artık değiştirmiyor; yanıt için
+    ayrı sözlük kuruluyor. Hiçbir çağıran mutasyona dayanmıyordu.
+- `app/services/masa_service.py`
+  - `get_dynamic_qr_info` masa yoksa `{}` yerine `None` döner.
+  - QR metotları `DinamikQRResponse` üretir.
+- `app/services/{auth,urun,kategori}_service.py`, `app/api/.../garson.py`
+  - Kalan dönüş tipleri eklendi; `ban_device` ve `add_tahsilat` artık
+    `GenelBasariliResponse` döner.
+- `tests/test_order_ownership.py`
+  - `get_masa_aktif_siparis` sonucu artık nesne olduğu için 5 assertion
+    sözlük erişiminden alan erişimine çevrildi. Testlerin anlamı aynı.
+
+#### Files deleted
+
+- `app/schemas/auth.py`, `catalog.py`, `orders.py`, `tables.py` (aynı adlı
+  paketlere dönüştüler; `from app.schemas.orders import X` gibi mevcut tüm
+  importlar `__init__.py` yeniden dışa aktarımı sayesinde değişmeden çalışır).
+
+#### Database / migrations
+
+- None. Entity alanları 2026-08-20'de `INFORMATION_SCHEMA.COLUMNS` üzerinden
+  canlı şemadan doğrulandı, şema değiştirilmedi.
+
+#### API changes
+
+- `GET /api/masalar/{masa_id}/dynamic-qr`: olmayan masa için artık 404 döner.
+  Önceden HTTP 200 ile boş gövde dönüyordu ve kasa ekranı modale "undefined"
+  basıyordu.
+- Diğer üç uç yalnızca şema deklarasyonu kazandı; gövdeleri değişmedi.
+
+#### Authentication / authorization changes
+
+- None.
+
+#### Tests added or modified
+
+- `tests/test_model_layer_contract.py` (12 test): her ucun `response_model`
+  deklare ettiği, hassas kolonların yanıt modellerinde tanımlı olmadığı,
+  entity'lerin çalışma zamanında `dict` kaldığı, her repository metodunun dönüş
+  tipi taşıdığı, adisyon gövdesinin refactor öncesiyle aynı anahtar kümesini
+  ürettiği ve olmayan masanın 404 döndüğü sabitlendi.
+- `tests/test_order_ownership.py`: 5 assertion yeni dönüş tipine uyarlandı.
+
+#### Tests executed
+
+- `python -m unittest discover -s tests` -> 261 test
+- `node tests/frontend/*.test.cjs` -> 9 dosya
+
+#### Test results
+
+- 261/261 Python testi geçti; 9/9 frontend sözleşme testi geçti.
+
+#### Verification performed
+
+- Gerçek ASGI uygulaması üzerinden kimlikli ve kimliksiz istekler atıldı:
+  `/api/masalar` yanıtında `totp_secret` ve `qr_kodu` yok; `/api/urunler`
+  yanıtında `aktif_mi` yok; `aktif-siparis` gövdesinin anahtar kümesi refactor
+  öncesiyle aynı; olmayan masa için `dynamic-qr` 404; korumalı uçlar tokensiz
+  hâlâ 401.
+- OpenAPI şeması üretildi; dört ucun da artık gövde şeması yayımlanıyor.
+
+#### Security impact
+
+- Doğrudan bir açık kapatılmadı, ama sızıntı yüzeyi daralttı: `response_model`
+  deklare etmeyen uç kalmadığı için servisten dönen bir satıra ileride kolon
+  eklenmesi artık o kolonu kendiliğinden dışarı vermez. Bu kural testle
+  sabitlendi.
+
+#### Architectural decisions
+
+- Entity'ler için `TypedDict` seçildi, pydantic `BaseModel` değil. Repository
+  ham SQL yazıyor ve satırlar zaten `dict`; `TypedDict` çalışma zamanında
+  hiçbir dönüştürme maliyeti eklemeden satırın şemasını deklare eder ve mevcut
+  testlerin tamamı (repository'leri sözlük döndürerek taklit eden mock'lar
+  dahil) değişmeden çalışır. Doğrulama ve dışa serileştirme pydantic'in işi
+  olarak `response.py` içinde kaldı.
+- Şema dosyaları aynı adlı paketlere dönüştürüldü, böylece mevcut import
+  yolları korundu ve tek bir çağrı yeri değiştirilmedi.
+
+#### Known issues / unfinished work
+
+- Servis katmanında `_publish_order_events`, `_calculate_item_authoritative_price`
+  gibi birkaç yardımcı hâlâ `dict` / `list` parametre tipi kullanıyor.
+- Aynı anda birden fazla gerçek kullanıcıyı gerçek veritabanına karşı sürecek
+  bir yük/entegrasyon testi hâlâ yok; eşzamanlılık testleri mock seviyesinde.
+
+#### Next action
+
+- Mentorun test maddesi kapsamında gerçek DB'ye karşı paralel istek atan bir
+  entegrasyon testi eklenebilir.
