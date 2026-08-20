@@ -57,7 +57,7 @@
     -webkit-tap-highlight-color: transparent;
 }
 
-button, a, .product-card, .category-card-box, .btn-add-circle, .btn-qty-step, .modal-close, .modal-overlay, .size-option-card {
+button, a, .product-card, .category-card-box, .btn-add-circle, .btn-qty-step, .modal-close, .modal-overlay, .size-option-card, .tracking-toggle {
     touch-action: manipulation;
     user-select: none;
     -webkit-user-select: none;

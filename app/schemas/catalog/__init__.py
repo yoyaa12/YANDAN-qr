@@ -21,7 +21,11 @@ from app.schemas.catalog.request import (
     UrunEkleModel,
     UrunGuncelleModel,
 )
-from app.schemas.catalog.response import KategoriResponse, UrunResponse
+from app.schemas.catalog.response import (
+    KaldirilanMenuResponse,
+    KategoriResponse,
+    UrunResponse,
+)
 
 __all__ = [
     # entity
@@ -39,6 +43,7 @@ __all__ = [
     "UrunEkleModel",
     "UrunGuncelleModel",
     # response
+    "KaldirilanMenuResponse",
     "KategoriResponse",
     "UrunResponse",
 ]

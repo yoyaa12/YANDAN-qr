@@ -6,7 +6,7 @@ detaydır, müşteri menüsünün bilmesi gerekmez. Fiyat da burada `float`'a
 çevrilir; `Decimal` JSON'da doğrudan temsil edilemez.
 """
 
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel
 
@@ -26,3 +26,16 @@ class KategoriResponse(BaseModel):
     id: int
     kategori_adi: str
     gorsel_url: Optional[str] = None
+
+
+class KaldirilanMenuResponse(BaseModel):
+    """Menüden kaldırılmış (pasifleştirilmiş) ürün ve kategoriler.
+
+    Yalnızca yönetici panelinin "geri getir" ekranı için. Kaldırma yumuşak
+    olduğu için bu kayıtlar veritabanında durmaya devam eder; bu uç onları
+    görünür kılar, aksi halde geri getirmenin tek yolu veritabanına elle
+    müdahale olurdu.
+    """
+
+    kategoriler: List[KategoriResponse] = []
+    urunler: List[UrunResponse] = []

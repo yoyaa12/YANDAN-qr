@@ -3003,7 +3003,7 @@ Ayrım noktası bilinçli: entity `sifre_hash`, `totp_secret`,
 #### Tests executed
 
 - `python -m unittest discover -s tests` -> 261 test
-- `node tests/frontend/*.test.cjs` -> 9 dosya
+- `node --test "tests/frontend/**/*.test.cjs"` -> 107 test
 
 #### Test results
 
@@ -3047,3 +3047,778 @@ Ayrım noktası bilinçli: entity `sifre_hash`, `totp_secret`,
 
 - Mentorun test maddesi kapsamında gerçek DB'ye karşı paralel istek atan bir
   entegrasyon testi eklenebilir.
+
+---
+
+### 2026-08-20 - Menüden kaldırma: FK ihlali ve sessiz cascade silme düzeltmesi
+
+#### Summary
+
+Yönetici panelindeki iki silme yolu da bozuktu; ikisi de canlı veritabanında
+doğrulandı:
+
+1. `DELETE /api/admin/urunler/{id}` — `SiparisDetaylari.urun_id` FK'sı
+   `NO_ACTION` olduğu için sipariş edilmiş bir ürünü silmek `IntegrityError`
+   fırlatıyor, uç HTTP 500 dönüyordu. Yani satılmış hiçbir ürün menüden
+   kaldırılamıyordu. ("Künefe" #5 ile doğrulandı.)
+2. `DELETE /api/admin/kategoriler/{id}` — `Urunler.kategori_id` FK'sı
+   `ON DELETE CASCADE` olduğu için kategori silmek altındaki bütün ürünleri
+   hiçbir uyarı vermeden siliyordu. ("İçecekler" #26 altındaki 14 ürünün
+   silindiği rollback'li denemeyle doğrulandı.) Ürünlerden biri daha önce
+   sipariş edilmişse cascade (1)'deki FK'ya çarpıp 500 veriyordu; yani aynı
+   düğme bazen veri siliyor, bazen patlıyordu.
+3. Ek olarak `static/js/admin.js` her iki çağrının yanıtını hiç okumuyordu:
+   sunucu 500 dönse bile yöneticiye "✅ silindi" mesajı gösteriliyordu.
+
+Düzeltme: her iki yol da artık `aktif_mi = 0` yazan bir UPDATE. `aktif_mi`
+kolonu iki tabloda da zaten vardı ve listeleme sorguları zaten ona göre
+filtreliyordu — yumuşak silme tasarımı yarım kalmıştı, tamamlandı. Uygulama
+hiçbir yerde `DELETE FROM Urunler` / `DELETE FROM Kategoriler` çalıştırmadığı
+için cascade artık tetiklenemez.
+
+#### Files created
+
+- `tests/test_menu_item_removal.py`
+
+#### Files modified
+
+- `app/repositories/urun_repo.py`
+  - `delete` -> `deactivate` (UPDATE, etkilenen satır sayısını döner).
+  - `deactivate_by_kategori` eklendi.
+  - `get_all` sorgularına `k.aktif_mi = 1` koşulu eklendi: pasif kategorinin
+    ürünü menüde asılı kalmasın (ikinci savunma hattı).
+- `app/repositories/kategori_repo.py`
+  - `delete` -> `deactivate` (UPDATE, etkilenen satır sayısını döner).
+- `app/services/urun_service.py`
+  - `delete_urun` yumuşak kaldırma yapar; bilinmeyen id için 404.
+- `app/services/kategori_service.py`
+  - `UrunRepository` DI ile enjekte edildi.
+  - `delete_kategori` tek transaction içinde kategoriyi ve ürünlerini kapatır,
+    etkilenen ürün sayısını döner; bilinmeyen id için 404.
+- `app/schemas/common.py`
+  - `AdminIslemResponse.etkilenen_urun_sayisi` (opsiyonel) eklendi.
+- `app/api/v1/endpoints/admin.py`
+  - Kaldırma yanıtları artık mesaj ve etkilenen ürün sayısı taşır.
+- `static/js/admin.js`
+  - `deleteProduct` / `deleteCategory` yanıt durumunu kontrol eder, hata
+    durumunda `detail` gösterir; onay ve başarı metinleri "sil" yerine
+    "menüden kaldır" olarak düzeltildi (satır gerçekten silinmiyor).
+
+#### Files deleted
+
+- None.
+
+#### Database / migrations
+
+- None. Şemaya dokunulmadı; düzeltme tamamen uygulama katmanında.
+- **Açık kalan:** `FK_Urunler_Kategoriler` hâlâ `ON DELETE CASCADE`. Uygulama
+  artık onu tetikleyemiyor ama SSMS'ten elle atılan bir `DELETE FROM
+  Kategoriler` yine ürünleri siler. Kuralı `NO_ACTION` yapan migration
+  kullanıcı onayına bırakıldı (AGENTS.md, şema değişikliği kuralı).
+
+#### API changes
+
+- `DELETE /api/admin/urunler/{id}`: satılmış ürün için 500 yerine 200.
+  Bilinmeyen/zaten kaldırılmış id için sessiz "success" yerine 404.
+- `DELETE /api/admin/kategoriler/{id}`: yanıt artık `message` ve
+  `etkilenen_urun_sayisi` taşıyor. Bilinmeyen id için 404.
+- Her iki uçta da kayıtlar silinmiyor, pasifleştiriliyor.
+
+#### Authentication / authorization changes
+
+- None.
+
+#### Tests added or modified
+
+- `tests/test_menu_item_removal.py` (11 test): kaldırmanın DELETE değil UPDATE
+  ürettiği, hiçbir sorguda `delete` geçmediği, menü sorgularının pasif ürün ve
+  pasif kategoriyi gizlediği, kategori kaldırmanın ürünleri de kapattığı ve
+  etkilenen sayıyı döndürdüğü, bilinmeyen id'nin 404 verdiği ve kategori yoksa
+  ürünlere hiç dokunulmadığı sabitlendi.
+
+#### Tests executed
+
+- `python -m unittest discover -s tests` -> 272 test
+- `node --test "tests/frontend/**/*.test.cjs"` -> 107 test
+
+#### Test results
+
+- 272/272 Python testi geçti; 9/9 frontend sözleşme testi geçti.
+
+#### Verification performed
+
+- Hata reprodüksiyonu (düzeltme öncesi, rollback'li): "Künefe" silme denemesi
+  `IntegrityError`; "İçecekler" silme denemesi 14 ürünü sessizce sildi.
+- Düzeltme sonrası gerçek ASGI uygulaması üzerinden, dış transaction ile
+  geri alınarak: satılmış ürün 200 ile kaldırıldı (menü 63 -> 62), satır
+  `aktif_mi = 0` olarak durdu, 9 sipariş kalemi bozulmadı; kategori 200 ile
+  kaldırıldı (`etkilenen_urun_sayisi = 14`, menü 62 -> 48), `Urunler`'de 14
+  satırın tamamı yerinde kaldı; bilinmeyen id'ler 404 döndü.
+- Doğrulama sonrası veritabanı ilk haline döndü (63 aktif ürün, 0 pasif ürün).
+
+#### Security impact
+
+- Doğrudan bir açık değil, ama veri kaybı riski kapandı: tek bir yönetici
+  tıklamasıyla geri dönüşsüz silinen ürünler artık yalnızca pasifleşiyor.
+  Ayrıca sipariş geçmişindeki kalem-ürün bağı korunuyor, yani kesilmiş bir
+  adisyon sonradan anlamını kaybetmiyor.
+
+#### Architectural decisions
+
+- Yumuşak silme, uygulama katmanında çözüldü; şema değiştirilmedi. `aktif_mi`
+  kolonları ve listeleme filtreleri zaten mevcuttu, eksik olan yalnızca silme
+  yolunun onları kullanmasıydı.
+- Kategori kapatma, kategori repository'sinin `Urunler` tablosuna dokunması
+  yerine servis katmanında iki repository çağrısı olarak kuruldu; sıra kritik
+  (önce kategori, tutmazsa ürünlere hiç dokunulmaz) ve ikisi tek transaction
+  içinde.
+
+#### Known issues / unfinished work
+
+- `FK_Urunler_Kategoriler` cascade kuralı duruyor (yukarıya bakınız).
+- Pasifleştirilen ürün/kategoriyi yönetici panelinden geri açma arayüzü yok;
+  şu an yalnızca veritabanından yapılabilir.
+
+#### Next action
+
+- Kullanıcı onay verirse cascade kuralını `NO_ACTION` yapan migration.
+
+---
+
+### 2026-08-20 - Menüye geri getirme arayüzü ve cascade migration betiği
+
+#### Summary
+
+Bir önceki girişte kaldırma işlemi yumuşak hale getirilmişti (`aktif_mi = 0`),
+ama iki eksik kalmıştı:
+
+1. Kaldırılan ürün/kategoriyi geri getirmenin arayüzden hiçbir yolu yoktu;
+   tek çare veritabanına elle müdahaleydi.
+2. `FK_Urunler_Kategoriler` hâlâ `ON DELETE CASCADE` idi. Uygulama artık
+   tetiklemiyor ama elle atılan bir `DELETE FROM Kategoriler` yine ürünleri
+   silerdi.
+
+İkisi de kapatıldı. Migration betiği yazıldı ancak **çalıştırılmadı**; şema
+değişikliği olduğu için kullanıcının kendi çalıştırmasına bırakıldı.
+
+Geri getirmede dikkat edilen nokta: menü sorgusu `k.aktif_mi = 1` koşulunu da
+uyguladığı için, kategorisi hâlâ kaldırılmış bir ürünü geri getirmek menüde
+görünmeyen bir ürün üretirdi. Bu durum 409 ile reddediliyor ve önce kategorinin
+geri getirilmesi gerektiği söyleniyor.
+
+#### Files created
+
+- `scripts/fix_kategori_cascade.py` (idempotent; **henüz çalıştırılmadı**)
+
+#### Files modified
+
+- `app/repositories/urun_repo.py`
+  - `get_inactive`, `activate`, `count_inactive_by_kategori` eklendi.
+  - `get_inactive` kategori JOIN'inde `k.aktif_mi` koşulu bilinçli olarak YOK:
+    kategorisi de kaldırılmış ürün listede görünmeli, yoksa geri getirilemez.
+- `app/repositories/kategori_repo.py`
+  - `get_by_id`, `get_inactive`, `activate` eklendi.
+- `app/services/urun_service.py`
+  - `KategoriRepository` DI ile enjekte edildi.
+  - `get_kaldirilan_urunler`, `restore_urun` eklendi; kategorisi kaldırılmış
+    ürün için 409, bilinmeyen ürün için 404, zaten menüdeki için 409.
+- `app/services/kategori_service.py`
+  - `get_kaldirilan_kategoriler`, `restore_kategori` eklendi. Kategoriyle
+    birlikte ürünler otomatik açılmaz; hâlâ kaldırılmış ürün sayısı döner.
+- `app/schemas/catalog/response.py`, `app/schemas/catalog/__init__.py`
+  - `KaldirilanMenuResponse` eklendi.
+- `app/api/v1/endpoints/admin.py`
+  - `GET /admin/menu/kaldirilanlar`
+  - `POST /admin/urunler/{urun_id}/geri-yukle`
+  - `POST /admin/kategoriler/{kategori_id}/geri-yukle`
+- `templates/admin.html`
+  - "3. Menüden Kaldırılanlar" bölümü. Kaldırılmış kayıt yoksa gizli kalır.
+  - `admin.js?v=2` -> `v=3` (cache busting).
+- `static/js/admin.js`
+  - `loadRemovedMenuItems`, `restoreCategory`, `restoreProduct`.
+  - Kaldırma işlemlerinden sonra liste tazeleniyor.
+
+#### Files deleted
+
+- None.
+
+#### Database / migrations
+
+- `scripts/fix_kategori_cascade.py` yazıldı: `FK_Urunler_Kategoriler` kısıtını
+  düşürüp `ON DELETE NO ACTION` ile yeniden kurar. Idempotent (kural zaten
+  CASCADE değilse hiçbir şey yapmaz), tek transaction, hiçbir satırı
+  silmez/değiştirmez.
+- **Betik çalıştırılmadı.** Şema değişikliği kullanıcı onayı gerektiriyor
+  (AGENTS.md). Çalıştırma komutu README yerine bu girişte:
+  `python scripts/fix_kategori_cascade.py`
+- Çalıştırıldıktan sonraki davranış: ürünü olan bir kategoriyi gerçekten
+  silmeye çalışmak FK hatası verir. Uygulama bu yolu zaten kullanmıyor.
+
+#### API changes
+
+- `GET /api/admin/menu/kaldirilanlar` (yeni): kaldırılmış ürün ve kategoriler.
+- `POST /api/admin/urunler/{id}/geri-yukle` (yeni): 200 / 404 / 409.
+- `POST /api/admin/kategoriler/{id}/geri-yukle` (yeni): 200 / 404, yanıtta
+  hâlâ kaldırılmış ürün sayısı.
+- Hepsi admin rolü gerektirir (router seviyesindeki mevcut bağımlılık).
+
+#### Authentication / authorization changes
+
+- None. Yeni uçlar mevcut admin router'ının altında.
+
+#### Tests added or modified
+
+- `tests/test_menu_item_removal.py` 11 -> 20 test. Eklenenler: geri getirmenin
+  de UPDATE olduğu, `AND aktif_mi = 0` koşulunun "zaten menüde" durumunu ayırt
+  ettiği, kaldırılanlar listesinin kategori durumuna bakmadığı, kategorisi
+  kaldırılmış ürünün 409 ile reddedildiği ve o durumda `activate`
+  çağrılmadığı, kategori geri getirmenin ürünleri otomatik açmadığı.
+
+#### Tests executed
+
+- `python -m unittest discover -s tests` -> 281 test
+- `node --test "tests/frontend/**/*.test.cjs"` -> 107 test
+
+#### Test results
+
+- 281/281 Python testi geçti; 9/9 frontend sözleşme testi geçti.
+
+#### Verification performed
+
+- Gerçek ASGI uygulaması üzerinden, dış transaction ile geri alınarak:
+  ürün kaldırıldı -> kaldırılanlar listesinde göründü -> geri yüklendi (200) ->
+  menüde tekrar göründü. Kategori kaldırıldı -> içindeki ürünü tek başına geri
+  getirme denemesi 409 ve doğru yönlendirme mesajı verdi -> kategori geri
+  getirildi (200, "14 ürünü hâlâ kaldırılmış durumda") -> ürün geri getirildi
+  (200).
+- Doğrulama sonrası veritabanı ilk haline döndü (0 pasif ürün).
+- `templates/admin.html` ile `static/js/admin.js` arasında ID çapraz kontrolü:
+  JS'in aradığı 17 element ID'sinin tamamı HTML'de mevcut.
+
+#### Security impact
+
+- Yeni uçların üçü de admin rolü gerektiriyor. Geri getirme yalnızca `aktif_mi`
+  bayrağını değiştirir; başka hiçbir alana dokunmaz.
+
+#### Architectural decisions
+
+- Kategori geri getirildiğinde ürünleri OTOMATİK açılmaz. Kaldırma sırasında
+  kategorinin ürünleri kapatılmıştı, ama aynı kategoride daha önce tek tek
+  kaldırılmış ürünler de olabilir; toplu açmak yöneticinin bilerek menüden
+  çıkardığı ürünleri geri diriltirdi. Hangi ürünün döneceğine yönetici karar
+  verir; kaç ürünün beklediği yanıtta bildirilir.
+- "Kaldırılanlar" listesi controller'da iki servisin sonucundan derleniyor;
+  hiçbir repository başka bir tabloya uzanmıyor.
+
+#### Known issues / unfinished work
+
+- Cascade migration'ı çalıştırılmadı (yukarıya bakınız).
+- `static/js/admin.js` kullanıcı girdisini HTML'e kaçış yapmadan basıyor
+  (mevcut kodun her yerinde olan bir desen, yeni bölüm de ona uydu). Yalnızca
+  admin panelinde ve admin'in kendi girdiği veriyle sınırlı; ayrı bir iş olarak
+  ele alınmalı.
+
+#### Next action
+
+- `python scripts/fix_kategori_cascade.py` çalıştırılması.
+
+---
+
+### 2026-08-20 - Yönetici panelinde HTML kaçışı (XSS yüzeyi kapatıldı)
+
+#### Summary
+
+`static/js/admin.js`, projedeki tek panel JS'iydi ki `escapeHtml` kullanmıyor
+ve `templates/admin.html` de `security.js` yardımcısını hiç yüklemiyordu.
+Kategori ve ürün adları yöneticinin serbest metin girdisidir ve tablolar
+`innerHTML` ile basılıyordu; adın içine konan bir etiket panelde çalışırdı.
+
+En riskli yer stok güncelleme düğmesiydi: ürün adı, çift tırnaklı bir HTML
+özniteliğinin (`onclick="..."`) içindeki tek tırnaklı bir JS string literaline
+gömülüyordu. Oradaki `.replace(/'/g, "\'")` yalnızca tek tırnağı ele alıyordu,
+yani adın içindeki bir çift tırnak özniteliği kapatabiliyordu.
+
+Düzeltme, projenin kendi mevcut kuralını admin paneline de uygulamaktan ibaret:
+`security.js` yüklenir, `escapeHtml` her serbest metin çıkışında kullanılır.
+`onclick` içindeki iç içe geçme ise tamamen kaldırıldı; ürün adı artık `data-`
+özniteliğinde taşınıyor ve handler onu `dataset` üzerinden okuyor.
+
+#### Files created
+
+- None.
+
+#### Files modified
+
+- `templates/admin.html`
+  - `security.js?v=1` eklendi (admin.js'ten önce yüklenir).
+  - `admin.js?v=3` -> `v=4` (cache busting).
+- `static/js/admin.js`
+  - `const escapeHtml = window.SecurityText.escapeHtml;` (diğer panellerle
+    birebir aynı satır).
+  - 9 serbest metin çıkışı `escapeHtml` ile sarıldı: kategori tablosu, ürün
+    ekleme select'i, filtre select'i, ürün tablosu (ad + kategori),
+    kaldırılanlar tablosu (kategori, ürün adı, kategori adı).
+  - `updateProductStock(urunId, urunAdi)` -> `updateProductStock(urunId)`.
+    Ad artık `data-urun-adi` özniteliğinden okunuyor.
+- `tests/frontend/security_contract.test.cjs`
+  - `assertHelperLoadsBefore` listesine `admin.html` / `admin.js` eklendi.
+  - İki yeni test.
+
+#### Files deleted
+
+- None.
+
+#### Database / migrations
+
+- None.
+
+#### API changes
+
+- None. Değişiklik tamamen istemci tarafında.
+
+#### Authentication / authorization changes
+
+- None.
+
+#### Tests added or modified
+
+- `tests/frontend/security_contract.test.cjs` 5 -> 7 test:
+  - "admin panel encodes every free-text name it renders": her adın
+    `escapeHtml` ile sarıldığını doğrular ve kaçışsız bir ad kalmadığını
+    (`doesNotMatch`) sabitler.
+  - "admin panel never embeds a product name inside an onclick attribute":
+    `data-urun-adi` yaklaşımını ve hiçbir `onclick` özniteliğinin içinde JS
+    string literali kalmadığını sabitler.
+
+#### Tests executed
+
+- `python -m unittest discover -s tests` -> 281 test
+- `node --test "tests/frontend/**/*.test.cjs"` -> 107 test (security_contract 7 test)
+
+#### Test results
+
+- 281/281 Python testi geçti; 9/9 frontend sözleşme testi geçti.
+
+#### Verification performed
+
+- Mutasyon testi: `${escapeHtml(p.urun_adi)}` geçici olarak `${p.urun_adi}`
+  yapıldı; "admin panel encodes every free-text name it renders" testi kırıldı
+  (7 testten 1'i FAIL), düzeltme geri konunca tekrar geçti. Yani test gerçekten
+  davranışı koruyor, boş yere geçmiyor.
+- `node --check static/js/admin.js` sözdizimi doğrulaması.
+
+#### Security impact
+
+- Yönetici panelindeki depolanmış XSS yüzeyi kapandı. Etki alanı sınırlıydı
+  (admin rolü, admin'in kendi girdiği veri) ama ürün/kategori adları menüde de
+  görünüyor; `app.js` ve `waiter.js` bu adları zaten kaçırıyordu, admin paneli
+  eksik olan tek yerdi.
+
+#### Architectural decisions
+
+- Yeni bir yardımcı yazılmadı; `static/js/security.js` içindeki mevcut
+  `SecurityText.escapeHtml` kullanıldı. Diğer dört panelin kullandığı desenin
+  aynısı, böylece kural tek yerde tanımlı kalıyor.
+
+#### Known issues / unfinished work
+
+- None (bu iş kapsamında).
+
+#### Next action
+
+- None.
+
+---
+
+### 2026-08-20 - Ürün düzenleme (ad, kategori, fiyat, stok)
+
+#### Summary
+
+Yönetici panelinde ürünün yalnızca stoğu güncellenebiliyordu. Ad, fiyat veya
+kategori düzeltmenin panelden hiçbir yolu yoktu; `kategori_id` istek modelinde
+hiç bulunmadığı için bir ürün başka kategoriye taşınamıyordu.
+
+Ürün tablosuna satır içi "Düzenle" eklendi: satır dört giriş alanına dönüşür
+(ad, kategori seçimi, fiyat, stok), Kaydet/İptal ile kapanır. Mevcut hızlı stok
+kutusu olduğu gibi duruyor.
+
+Bu iş sırasında `UrunRepository.update` içindeki iki sorun da düzeltildi:
+
+- Her alan için AYRI bir UPDATE çalışıyordu. Arada oluşan bir hata ürünü yarı
+  güncellenmiş bırakabilirdi; artık tek UPDATE.
+- Kolon adı doğrudan f-string ile sorguya gömülüyordu. Bugün çağıranlar sabit
+  anahtarlar verdiği için sömürülebilir değildi, ama korumasızdı. Artık kolon
+  adları SQL'e girmeden önce beyaz listeye karşı doğrulanıyor.
+
+#### Files created
+
+- `tests/test_product_edit.py`
+
+#### Files modified
+
+- `app/schemas/catalog/request.py`
+  - `UrunGuncelleModel.kategori_id: Optional[int] = Field(gt=0)` eklendi.
+- `app/repositories/urun_repo.py`
+  - `GUNCELLENEBILIR_KOLONLAR` beyaz listesi (`id` ve `aktif_mi` bilinçli olarak
+    dışarıda; ikincisi kaldırma/geri getirme yolunun sorumluluğunda).
+  - `update` tek UPDATE üretir ve etkilenen satır sayısını döner (önceden
+    `None`).
+- `app/services/urun_service.py`
+  - `_assert_kategori_kullanilabilir`: hedef kategori yoksa 404, menüden
+    kaldırılmışsa 409.
+  - `update_urun` `kategori_id` yazar; bilinmeyen ürün için 404, hiçbir alan
+    göndermeyen istek için 400.
+- `templates/admin.html`
+  - `admin.js?v=4` -> `v=5`.
+- `static/js/admin.js`
+  - `adminProducts` / `adminCategories` / `editingProductId` durum değişkenleri.
+  - `renderAdminProductsTable`, `renderProductRow`, `renderProductEditRow`,
+    `startEditProduct`, `cancelEditProduct`, `saveEditProduct`.
+  - Tam yenileme her zaman düzenleme modundan çıkar.
+- `tests/frontend/security_contract.test.cjs`
+  - Düzenleme satırındaki `value` özniteliğinin kaçışlı olduğu ve
+    `saveEditProduct`'ın dört alanı da gönderip `res.ok` kontrol ettiği eklendi.
+
+#### Files deleted
+
+- None.
+
+#### Database / migrations
+
+- None. `Urunler.kategori_id` kolonu zaten vardı; yalnızca yazılabilir hale
+  geldi.
+
+#### API changes
+
+- `PUT /api/admin/urunler/{urun_id}` artık `kategori_id` kabul ediyor.
+- Aynı uç artık bilinmeyen ürün için 404, boş gövde için 400, menüden
+  kaldırılmış kategoriye taşıma için 409 dönüyor. Önceden üçü de sessizce
+  "success" idi.
+- Kısmi güncelleme anlamı korundu: gönderilmeyen alana dokunulmaz.
+
+#### Authentication / authorization changes
+
+- None. Uç mevcut admin router'ının altında.
+
+#### Tests added or modified
+
+- `tests/test_product_edit.py` (14 test): tek UPDATE üretildiği, gönderilmeyen
+  alanın sorguya girmediği, boş metnin yazılıp `None`'ın atlandığı, beyaz liste
+  dışındaki kolonun (ve SQL enjeksiyonu denemesinin) hiç SQL'e ulaşmadığı,
+  kategori doğrulamasının 404/409 verdiği, bilinmeyen ürünün 404 ve boş gövdenin
+  400 olduğu, yalnızca stok düzenlemesinin `stok_guncellendi` yayınladığı ve
+  stoksuz düzenlemenin hiçbir şey yayınlamadığı sabitlendi.
+- `tests/frontend/security_contract.test.cjs`: 7 -> 8 test.
+
+#### Tests executed
+
+- `python -m unittest discover -s tests` -> 295 test
+- `node --test "tests/frontend/**/*.test.cjs"` -> 108 test
+
+#### Test results
+
+- 295/295 Python testi geçti; 108/108 frontend testi geçti.
+
+#### Verification performed
+
+- Gerçek ASGI uygulaması üzerinden, dış transaction ile geri alınarak:
+  tam düzenleme 200 (ad/kategori/fiyat/stok dördü de yazıldı); yalnızca
+  `stok_miktari` gönderen istek adı ve fiyatı değiştirmedi; kaldırılmış
+  kategoriye taşıma 409; olmayan ürün 404; boş gövde 400; negatif fiyat 422.
+- `templates/admin.html` ile `static/js/admin.js` arasında statik ID çapraz
+  kontrolü: eksik yok.
+
+#### Security impact
+
+- `UrunRepository.update` artık kolon adlarını beyaz listeye karşı doğruluyor.
+  Mevcut çağıranlar sabit anahtarlar verdiği için sömürülebilir bir açık yoktu,
+  ama dinamik SET ifadesi korumasızdı; test bir enjeksiyon denemesinin hiç SQL'e
+  ulaşmadığını sabitliyor.
+- Düzenleme satırındaki `value` öznitelikleri `escapeHtml` ile yazılıyor.
+
+#### Architectural decisions
+
+- Satır içi düzenleme seçildi (modal yerine): tablo yapısına ve mevcut stok
+  kutusu desenine uyuyor, yeni bir bileşen gerektirmiyor.
+- Aynı anda tek satır düzenlenir. Birden çok açık form, hangisinin
+  kaydedilmediğini takip etmeyi zorlaştırırdı.
+- Satırlar sunucuya gitmeden önbellekten yeniden çizilir; düzenleme moduna
+  girip çıkmak ağ gecikmesi yaşatmaz.
+
+#### Known issues / unfinished work
+
+- Menüde açık olan müşteri ekranları ürün adı/fiyat değişikliğini canlı
+  görmüyor; yalnızca `stok_guncellendi` olayı var. Yönetici fiyatı YÜKSELTİRSE,
+  menüsü açık duran müşterinin siparişi `_calculate_item_authoritative_price`
+  tarafından "gönderilen birim fiyat taban fiyattan düşük olamaz" hatasıyla
+  reddedilir. Nadir ama kafa karıştırıcı; bir "menu_guncellendi" olayı ile
+  çözülebilir.
+- Açıklama (`aciklama`) alanı istek modelinde destekli ama düzenleme formunda
+  yok; tabloda da gösterilmiyor.
+
+#### Next action
+
+- None.
+
+---
+
+### 2026-08-20 - Adisyon kartındaki donma + düzenleme formuna açıklama alanı
+
+#### Summary
+
+**1. Adisyon kartında donma.** Müşteri "Adisyonu küçültmek için tıklayın"
+satırına her bastığında ve adisyonu genişletirken anlık bir donma yaşıyordu.
+Tarayıcıda ölçüldü: çizim suçlu değil (JS ~1 ms, layout ~1 ms). İki gerçek
+neden bulundu:
+
+- `style.css` içinde dokunulabilir öğelerin `touch-action: manipulation;
+  user-select: none;` aldığı bir seçici listesi var. Toggle hedeflerinin ikisi
+  de (kapalı kart ve açık karttaki alt satır) bu listede yoktu. `touch-action`
+  taşımayan bir öğede mobil tarayıcı, çift dokunuşla yakınlaştırma ihtimali
+  için dokunuştan sonra ~300 ms bekler. Kullanıcının hissettiği gecikme buydu.
+- `checkActiveOrder` 3 saniyede bir çalışıp kartı baştan kuruyordu. Ölçülen
+  sonuç: `.tracking-scroll-list` kaydırması her seferinde başa dönüyordu
+  (scrollTop 120 -> 0), yani adisyonu açıp listeyi okumaya çalışan müşteri
+  sürekli yukarı atılıyordu. Ayrıca hiçbir şey değişmemişken bile 45 KB HTML
+  yeniden ayrıştırılıyordu.
+
+**2. Açıklama alanı.** Ürün düzenleme formuna `aciklama` eklendi. Alan istek
+modelinde zaten destekliydi ama ne tabloda ne formda vardı.
+
+#### Files created
+
+- None.
+
+#### Files modified
+
+- `static/css/style.css`
+  - Dokunulabilir seçici listesine `.tracking-toggle` eklendi.
+- `static/js/app.js`
+  - Her iki toggle hedefi `tracking-toggle` sınıfını alıyor.
+  - `applyTrackingHTML(container, html)`: üretilen gövde bir öncekiyle
+    birebir aynıysa DOM'a hiç dokunulmuyor; gerçekten değiştiğinde de
+    `.tracking-scroll-list` kaydırma konumu korunuyor.
+  - `dismissTrackingUI` ve "sipariş yok" yolu önbelleği sıfırlıyor.
+- `static/js/admin.js`
+  - Düzenleme satırına tam genişlikte ikinci bir satır olarak `Açıklama`
+    girişi. Boş açıklama `null` değil `""` gönderiliyor: `null` "dokunma",
+    `""` "bilerek boşalt" demek.
+- `templates/admin.html` — `admin.js?v=5` -> `v=6`.
+- `templates/menu.html` — `style.css?v=74` -> `v=75`, `app.js?v=88` -> `v=89`.
+- `templates/garson.html` — `style.css?v=6` -> `v=7`.
+- `templates/kasa.html` — `style.css?v=25` -> `v=26`.
+- `templates/admin.html` — `style.css?v=1001` -> `v=1002`.
+- `tests/frontend/customer_order_ownership.test.cjs`
+  - Sahte DOM'a `querySelector` ve sandbox'a `lastTrackingHTML` eklendi;
+    `applyTrackingHTML` de çıkarılan bloklara girdi.
+  - Üç yeni test.
+- `tests/frontend/security_contract.test.cjs`
+  - `saveEditProduct` alan listesine `aciklama`; açıklama `value`
+    özniteliğinin kaçışlı olduğu eklendi.
+
+#### Files deleted
+
+- None.
+
+#### Database / migrations
+
+- None.
+
+#### API changes
+
+- None. `aciklama` zaten `UrunGuncelleModel` içinde destekliydi.
+
+#### Authentication / authorization changes
+
+- None.
+
+#### Tests added or modified
+
+- `tests/frontend/customer_order_ownership.test.cjs` 13 -> 16 test:
+  - iki toggle hedefinin de `tracking-toggle` sınıfını taşıdığı ve sınıfın
+    dokunulabilir seçici listesinde olduğu,
+  - veri değişmediğinde art arda beş çizimin DOM'a hiç yazmadığı,
+  - gerçek bir değişiklikte tam bir kez yazdığı.
+- `tests/frontend/security_contract.test.cjs`: açıklama alanı eklendi.
+
+#### Tests executed
+
+- `python -m unittest discover -s tests` -> 295 test
+- `node --test "tests/frontend/**/*.test.cjs"` -> 111 test
+
+#### Test results
+
+- 295/295 Python testi geçti; 111/111 frontend testi geçti.
+
+#### Verification performed
+
+- Tarayıcıda canlı ölçüm (`http://localhost:8000/menu?masa=5`, 8 siparişlik
+  sahte adisyon):
+  - Düzeltme öncesi: toggle JS ~1 ms, layout ~1 ms -> çizim suçlu değil.
+    `scrollTop` 120 -> 0, DOM düğümü her çizimde değişiyor.
+  - Düzeltme sonrası: her iki toggle hedefinde `touch-action: manipulation`,
+    `user-select: none`; art arda 10 çizimde DOM düğümü aynı kaldı;
+    `scrollTop` 120 -> 120 korundu.
+- Açıklama alanı, gerçek ASGI uygulaması üzerinden rollback'li olarak: metin
+  yazıldı (200), boş metinle temizlendi (200), gönderilmediğinde dokunulmadı,
+  501 karakter 422 ile reddedildi.
+- Yönetici panelinde canlı DOM kontrolü: düzenleme satırında beş alan da doğru
+  değerlerle geliyor (ad, kategori seçimi 8 seçenekli ve doğru seçili, fiyat,
+  stok, açıklama).
+
+#### Security impact
+
+- Yok. Açıklama alanı da `escapeHtml` ile yazılıyor.
+
+#### Architectural decisions
+
+- Donma, çizimi hızlandırarak değil girdi gecikmesini kaldırarak çözüldü:
+  ölçüm çizimin zaten ~2 ms olduğunu gösterdi. Projenin kendi CSS listesine bir
+  sınıf eklemek, yeni bir kural yazmaktan daha tutarlı.
+- Gövde karşılaştırması, imza/sürüm takibi yerine üretilen HTML'i doğrudan
+  karşılaştırıyor. HTML kurulumu zaten ~1 ms; string karşılaştırması bundan
+  ucuz ve hiçbir alanı yanlışlıkla imzanın dışında bırakma riski yok.
+- Açıklama, tabloya yeni bir kolon olarak değil, düzenleme modunda açılan
+  tam genişlikte ikinci satır olarak eklendi; normal görünümde tablo genişliği
+  değişmiyor.
+
+#### Known issues / unfinished work
+
+- 3 saniyelik `checkActiveOrder` yoklaması duruyor. Artık DOM'a dokunmadığı
+  için zararsız, ama socket zaten aynı olayları taşıyor; ileride kaldırılabilir.
+- Menüdeki müşteri hâlâ ürün adı/fiyat değişikliğini canlı görmüyor (önceki
+  girişteki not geçerli).
+
+#### Next action
+
+- None.
+
+---
+
+### 2026-08-20 - Müşteri menüsü ve kasa panelinde depolanmış XSS kapatıldı
+
+#### Summary
+
+Güvenlik incelemesi sırasında bulundu: müşteri menüsünde sunucudan gelen
+serbest metin sekiz yerde kaçış yapılmadan HTML'e giriyordu. `app.js` ürün ve
+kategori kartlarını `prod.` / `cat.` önekleriyle çiziyor, mevcut denetim testi
+ise yalnızca `item|d|grp|group.urun_adi` kalıbını arıyordu; bu yüzden hepsi
+denetimin dışında kalmıştı. `gorsel_url` hiç kapsanmıyordu.
+
+Sömürü doğrulandı (script çalıştırmadan, üretilen metin ayrıştırılarak):
+
+    girdi : gorsel_url = 'x" onerror="COD_CALISTI'
+    cikti : <img src="x" onerror="COD_CALISTI" class="category-card-img" ...>
+
+Yani yönetici panelinden girilen bir ürün adı veya görsel adresi, QR okutan her
+müşterinin tarayıcısında çalışabilen bir olay niteliğine dönüşüyordu. Yetki
+sınırı aşımı: panele erişen biri restoranın bütün müşterilerine ulaşıyordu.
+
+Genişletilen test, ilk çalıştırmada `kasa.js` içinde dokuzuncu bir sink daha
+buldu (dinamik QR modalındaki masa adı).
+
+#### Files created
+
+- None.
+
+#### Files modified
+
+- `static/js/app.js`
+  - `safeImageUrl()` eklendi: `src` bir URL bağlamı olduğu için kaçış tek
+    başına yetmiyor. Yalnızca site içi mutlak yol ve `http`/`https` adreslerine
+    izin verilir; `javascript:`, `data:`, protokol-göreli `//evil.com` ve
+    öznitelikten kaçmaya çalışan değerler boş döner (çağıran zaten görsel yoksa
+    ikon yer tutucusu gösteriyor).
+  - 8 sink kapatıldı: kategori kartı görseli + `alt` + başlık, kategori bölüm
+    başlığı, ürün kartı görseli + `alt`, ürün başlığı `title` + metni.
+- `static/js/kasa.js`
+  - Dinamik QR modalındaki `data.masa_no` kaçışa alındı.
+- `templates/menu.html` — `app.js?v=89` -> `v=90`.
+- `templates/kasa.html` — `kasa.js?v=65` -> `v=66`.
+- `tests/frontend/ui_rules_contract.test.cjs`
+  - "no product name reaches an HTML sink unencoded" -> "no server-supplied
+    free text reaches an HTML sink unencoded". Kalıp artık değişken adına
+    değil ALAN adına bakıyor (`urun_adi`, `kategori_adi`, `gorsel_url`,
+    `aciklama`, `urun_notu`, `masa_no`, `garson_adi`) ve `admin.js` de kapsama
+    girdi. Dar kalıp bu açığın yıllarca görünmez kalmasının sebebiydi.
+  - `safeImageUrl` davranışını doğrulayan yeni test (izin verilen ve
+    reddedilen şemalar).
+
+#### Files deleted
+
+- None.
+
+#### Database / migrations
+
+- None.
+
+#### API changes
+
+- None. Değişiklik tamamen istemci tarafında.
+
+#### Authentication / authorization changes
+
+- None.
+
+#### Tests added or modified
+
+- `tests/frontend/ui_rules_contract.test.cjs`: 11 -> 12 test; mevcut sink
+  taraması alan bazlı hale getirildi ve 5 panel dosyasını kapsıyor.
+
+#### Tests executed
+
+- `python -m unittest discover -s tests` -> 295 test
+- `node --test "tests/frontend/**/*.test.cjs"` -> 112 test
+
+#### Test results
+
+- 295/295 Python testi geçti; 112/112 frontend testi geçti.
+
+#### Verification performed
+
+- Sömürü kanıtı: şablonun birebir aynısı çalıştırıldı, enjekte edilen
+  `onerror` niteliğinin oluştuğu gösterildi.
+- Düzeltme sonrası tarama: 5 panel dosyasında kaçışsız sink kalmadı.
+- `safeImageUrl` girdi tablosu: `/static/img/a.png` ve `https://...` geçer;
+  `javascript:`, `data:`, `//evil.com`, `/\evil.com`, `x" onerror="..." boş
+  döner.
+- Yetkilendirme sınamaları (canlı ASGI, rollback'li): tokensiz 7 korumalı uç
+  401; garson tokeniyle 2 admin işlemi 403; yanlış anahtarla imzalanmış ve
+  imzası kurcalanmış token 401; masa 5 müşterisinin masa 6 adisyonunu okuması
+  ve masa 6 adına sipariş vermesi 403; müşteri tokeniyle personel/admin uçları
+  401. 15/15 tuttu.
+- İş mantığı sınamaları: birim fiyatı 1 TL'ye düşürme 400; `toplam_tutar=0`
+  gönderildiğinde sunucu gerçek tutarı (160 TL) yazdı; stok 3 iken 10 adet 400,
+  3 adet 200, ardından 1 adet daha 400; negatif adet 422; gövdede
+  `customer_session_id` sahtelemesi yok sayıldı; `kategori_id`'ye üç ayrı SQL
+  enjeksiyonu denemesi 422 ile reddedildi ve `Urunler` tablosu (63 satır)
+  yerinde kaldı.
+
+#### Security impact
+
+- Yönetici -> müşteri yönünde depolanmış XSS kapatıldı. Etki alanı, panele
+  erişebilen birinin QR okutan her müşterinin tarayıcısında kod
+  çalıştırabilmesiydi (örneğin `localStorage`'daki oturum token'ını dışarı
+  sızdırmak).
+- `src` bağlamı için ayrıca şema kısıtı getirildi; kaçış tek başına
+  `javascript:` benzeri değerleri engellemezdi.
+
+#### Architectural decisions
+
+- Denetim testi genişletildi, yeni bir test dosyası açılmadı: açığın sebebi
+  koruma eksikliği değil, KORUMANIN KAPSAMININ dar olmasıydı. Kalıbı değişken
+  adı yerine alan adına bağlamak aynı hatanın tekrarını engelliyor.
+- Metin bağlamı için `escapeHtml`, URL bağlamı için `safeImageUrl` — iki ayrı
+  bağlam, iki ayrı temizleyici.
+
+#### Known issues / unfinished work
+
+- Güvenlik incelemesinin diğer maddeleri açık: HTTPS yok, personel tokeni
+  iptal edilemiyor (30 gün TTL), rate limit ve QR replay koruması süreç
+  belleğinde, güvenlik başlığı yok, `run.py` `reload=True`,
+  `TrustServerCertificate=yes`, denetim kaydı yok, canlı QR token'ı
+  `api.qrserver.com`'a gidiyor.
+
+#### Next action
+
+- None (bu iş kapsamında).

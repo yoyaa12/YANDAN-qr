@@ -50,7 +50,9 @@ function order(id, tutar, isMine, urunAdi) {
  * HTML'i döner.
  */
 function renderTracking({ orders, genelToplam, benimToplamim, mode = 'table' }) {
-    const container = { style: {}, innerHTML: '' };
+    // `applyTrackingHTML` kaydırma konumunu korumak için `.tracking-scroll-list`
+    // arıyor; sahte DOM'da böyle bir düğüm yok.
+    const container = { style: {}, innerHTML: '', querySelector: () => null };
     const store = {};
 
     const sandbox = {
@@ -61,6 +63,9 @@ function renderTracking({ orders, genelToplam, benimToplamim, mode = 'table' }) 
             benimToplamim
         },
         isTrackingCollapsed: false,
+        // `applyTrackingHTML` bunu okur ve yazar; app.js'te modül düzeyinde
+        // tanımlı olduğu için sandbox'a ayrıca verilmesi gerekiyor.
+        lastTrackingHTML: '',
         expandedGroupDetailsMap: {},
         renderedGroupKeys: [],
         escapeHtml: value => String(value),
@@ -81,6 +86,7 @@ function renderTracking({ orders, genelToplam, benimToplamim, mode = 'table' }) 
         // sonlandirici blogu yarida keserdi.
         extractBlock(appSource, '// "Benim Siparişlerim" / "Masanın Tümü" görünümü.', '\n})();'),
         extractBlock(appSource, 'window.setOrderViewMode = function (mode) {', '\n};'),
+        extractBlock(appSource, 'function applyTrackingHTML(container, html) {'),
         extractBlock(appSource, 'function renderOrderTrackingUI() {')
     ].join('\n');
 
@@ -235,4 +241,77 @@ test('app.js got a fresh cache version', () => {
 
 test('app.js still parses', () => {
     assert.doesNotThrow(() => new vm.Script(appSource, { filename: 'app.js' }));
+});
+
+// ---------------------------------------------------------------------------
+// Adisyon kartında donma / takılma
+//
+// Müşteri "Adisyonu küçültmek için tıklayın" satırına her bastığında anlık bir
+// donma yaşanıyordu; adisyonu genişletirken de aynısı oluyordu. Ölçüm, çizimin
+// suçlu olmadığını gösterdi (JS ~1 ms, layout ~1 ms). İki gerçek neden vardı.
+// ---------------------------------------------------------------------------
+
+test('both bill toggles are registered as tappable targets', () => {
+    const source = read('static/js/app.js');
+    const css = read('static/css/style.css');
+
+    // Neden: `touch-action: manipulation` taşımayan bir öğede mobil tarayıcı,
+    // çift dokunuşla yakınlaştırma ihtimali için dokunuştan sonra ~300 ms
+    // bekler. Kullanıcının "anlık donma" dediği gecikme buydu ve her iki yönde
+    // de yaşanıyordu. `user-select` olmadan ise metne dokunmak seçim başlatıyor.
+    const toggleSatirlari = source.split('\n').filter(line => line.includes('onclick="toggleTrackingUI()"'));
+    assert.equal(toggleSatirlari.length, 2, 'kapalı ve açık kart olmak üzere iki toggle hedefi');
+    for (const line of toggleSatirlari) {
+        assert.match(line, /class="[^"]*tracking-toggle/, 'her toggle hedefi tracking-toggle sınıfını taşımalı');
+    }
+
+    // Sınıf, projenin dokunulabilir öğe listesine eklenmiş olmalı.
+    const kural = css.split('\n').find(line => line.includes('touch-action: manipulation') === false && line.includes('.size-option-card'));
+    assert.ok(kural && kural.includes('.tracking-toggle'), 'tracking-toggle dokunulabilir seçici listesinde olmalı');
+});
+
+test('an unchanged bill is never rewritten into the DOM', () => {
+    // `checkActiveOrder` 3 saniyede bir çalışıp kartı baştan kuruyordu. Bunun
+    // ölçülen sonucu: `.tracking-scroll-list` içindeki kaydırma her seferinde
+    // başa dönüyordu (scrollTop 120 -> 0), yani adisyonu açıp listeyi okumaya
+    // çalışan müşteri sürekli yukarı atılıyordu.
+    const { container, sandbox } = renderTracking({
+        orders: THREE_ORDERS, genelToplam: 400, benimToplamim: 150
+    });
+
+    const ilkGovde = container.innerHTML;
+    assert.ok(ilkGovde.length > 0, 'ilk çizim gövdeyi yazmalı');
+
+    let yazmaSayisi = 0;
+    let saklanan = ilkGovde;
+    Object.defineProperty(container, 'innerHTML', {
+        get: () => saklanan,
+        set: value => { yazmaSayisi += 1; saklanan = value; }
+    });
+
+    for (let i = 0; i < 5; i++) sandbox.renderOrderTrackingUI();
+
+    assert.equal(yazmaSayisi, 0, 'veri değişmediyse DOM’a hiç yazılmamalı');
+});
+
+test('a changed bill is written into the DOM', () => {
+    // Atlama yalnızca gövde birebir aynıysa geçerli olmalı; yeni bir sipariş
+    // düştüğünde kart mutlaka güncellenmeli.
+    const { container, sandbox } = renderTracking({
+        orders: THREE_ORDERS, genelToplam: 400, benimToplamim: 150
+    });
+
+    let yazmaSayisi = 0;
+    let saklanan = container.innerHTML;
+    Object.defineProperty(container, 'innerHTML', {
+        get: () => saklanan,
+        set: value => { yazmaSayisi += 1; saklanan = value; }
+    });
+
+    sandbox.state.activeOrders = THREE_ORDERS.concat([order(4, 75, true, 'Künefe')]);
+    sandbox.state.genelToplam = 475;
+    sandbox.renderOrderTrackingUI();
+
+    assert.equal(yazmaSayisi, 1, 'gerçek değişiklik bir kez yazılmalı');
+    assert.match(saklanan, /Künefe/);
 });

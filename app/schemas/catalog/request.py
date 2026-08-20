@@ -33,9 +33,19 @@ class UrunEkleModel(BaseModel):
 
 
 class UrunGuncelleModel(BaseModel):
-    """Kısmi güncelleme: yalnızca `None` olmayan alanlar yazılır."""
+    """Kısmi güncelleme: yalnızca `None` olmayan alanlar yazılır.
+
+    Gönderilmeyen alan "değiştirme" demektir, "boşalt" demek değil. Yönetici
+    panelindeki düzenleme formu alanların tamamını gönderir; stok kutusu ise
+    yalnızca `stok_miktari` gönderir.
+
+    `kategori_id` ürünü başka bir kategoriye taşır. Servis katmanı hedef
+    kategorinin var olduğunu ve menüden kaldırılmamış olduğunu doğrular:
+    kaldırılmış bir kategoriye taşınan ürün menüde hiç görünmezdi.
+    """
 
     urun_adi: Optional[str] = Field(default=None, min_length=1, max_length=URUN_ADI_MAX)
+    kategori_id: Optional[int] = Field(default=None, gt=0)
     fiyat: Optional[float] = Field(default=None, ge=0, le=PARA_MAX)
     aciklama: Optional[str] = Field(default=None, max_length=ACIKLAMA_MAX)
     stok_miktari: Optional[int] = Field(default=None, ge=0, le=STOK_MAX)

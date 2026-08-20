@@ -1912,7 +1912,7 @@ window.showDynamicQRModal = async function (masaId) {
                 <div class="modal-content" style="max-width: 380px; text-align: center; background:#181824; color:#fff; padding:28px; border-radius:20px; position:relative; box-shadow:0 20px 60px rgba(0,0,0,0.6); border:1px solid rgba(255,188,0,0.25);">
                     <button style="position:absolute; top:12px; right:16px; background:none; border:none; color:#aaa; font-size:26px; cursor:pointer;" onclick="clearInterval(activeQRInterval); document.getElementById('kasaQRModal').remove()">&times;</button>
                     
-                    <h3 style="color:#ffbc00; margin:0 0 6px 0; font-size:1.3rem;">📱 Canlı Dinamik QR (Masa #${data.masa_no || masaId})</h3>
+                    <h3 style="color:#ffbc00; margin:0 0 6px 0; font-size:1.3rem;">📱 Canlı Dinamik QR (Masa #${escapeHtml(data.masa_no || masaId)})</h3>
                     <p style="font-size:0.82rem; color:#aaa; margin:0 0 18px 0;">Telefon kamerası ile okutarak doğrudan masa oturumuna girebilirsiniz:</p>
                     
                     <div style="background:#ffffff; padding:18px; border-radius:16px; display:inline-block; margin-bottom:18px; box-shadow:0 8px 25px rgba(0,0,0,0.3);">

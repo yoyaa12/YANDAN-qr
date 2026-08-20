@@ -4,6 +4,28 @@
 
 const escapeHtml = window.SecurityText.escapeHtml;
 
+/**
+ * Yönetici panelinden gelen görsel adresini `src` özniteliğine yazılabilir hale
+ * getirir.
+ *
+ * Kaçış tek başına yeterli değil: `src` bir URL bağlamı, dolayısıyla değerin
+ * biçimi de denetlenmeli. Yalnızca site içi mutlak yol (`/static/...`) ve
+ * `http`/`https` adreslerine izin verilir; `javascript:`, `data:` gibi şemalar
+ * ve öznitelikten kaçmaya çalışan değerler boş döner. Boş dönmesi zararsızdır:
+ * çağıran zaten görsel yoksa ikon yer tutucusunu gösteriyor.
+ */
+function safeImageUrl(value) {
+    const url = String(value ?? '').trim();
+    if (!url) return '';
+    // `//evil.com` ve `/\evil.com` protokol-göreli adreslerdir; tek eğik çizgiyle
+    // başlasalar da tarayıcı bunları dış siteye çözer, o yüzden site içi
+    // sayılmazlar.
+    const siteIci = url.startsWith('/') && !url.startsWith('//') && !url.startsWith('/\\');
+    const mutlak = /^https?:\/\//i.test(url);
+    if (!siteIci && !mutlak) return '';
+    return escapeHtml(url);
+}
+
 let socket = null;
 
 let state = {
@@ -646,10 +668,10 @@ function renderCategoryGrid() {
         html += `
             <div class="category-card-box ${isActive ? 'active' : ''}" onclick="selectCategory(${cat.id})">
                 ${hasImg
-                ? `<img src="${cat.gorsel_url}" class="category-card-img" alt="${cat.kategori_adi}" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-block';"><span class="category-card-icon" style="display:none;">${icon}</span>`
+                ? `<img src="${safeImageUrl(cat.gorsel_url)}" class="category-card-img" alt="${escapeHtml(cat.kategori_adi)}" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-block';"><span class="category-card-icon" style="display:none;">${icon}</span>`
                 : `<span class="category-card-icon">${icon}</span>`
             }
-                <span class="category-card-title">${cat.kategori_adi}</span>
+                <span class="category-card-title">${escapeHtml(cat.kategori_adi)}</span>
             </div>
         `;
     });
@@ -716,7 +738,7 @@ function renderProducts() {
         html += `
             <div class="category-section" id="cat-section-${cat.id}" data-cat-id="${cat.id}">
                 <div class="category-section-title">
-                    <h2>${icon} ${cat.kategori_adi}</h2>
+                    <h2>${icon} ${escapeHtml(cat.kategori_adi)}</h2>
                 </div>
                 <div class="category-products-list">
         `;
@@ -845,7 +867,7 @@ function renderProductCardHTML(prod) {
         <div class="product-card ${isSelected ? 'selected' : ''} ${isOutOfStock ? 'out-of-stock' : ''}" id="product-card-${prod.id}" ${cardOnClick} style="${isOutOfStock ? 'opacity:0.55;' : ''}">
             <div class="product-card-image-box">
                 ${hasImage
-            ? `<img src="${prod.gorsel_url}" alt="${prod.urun_adi}" class="product-card-img" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+            ? `<img src="${safeImageUrl(prod.gorsel_url)}" alt="${escapeHtml(prod.urun_adi)}" class="product-card-img" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
                        <div class="product-card-placeholder" style="display:none;"><span>${icon}</span></div>`
             : `<div class="product-card-placeholder"><span>${icon}</span></div>`
         }
@@ -853,7 +875,7 @@ function renderProductCardHTML(prod) {
 
             <div class="product-card-content">
                 <div class="product-title-row">
-                    <div class="product-title" title="${prod.urun_adi}">${prod.urun_adi}</div>
+                    <div class="product-title" title="${escapeHtml(prod.urun_adi)}">${escapeHtml(prod.urun_adi)}</div>
                 </div>
 
                 <div class="product-bottom-row" style="display:flex; justify-content:space-between; align-items:flex-end; gap:4px; width:100%;">
@@ -1870,6 +1892,33 @@ window.setOrderViewMode = function (mode) {
     renderOrderTrackingUI();
 };
 
+// En son DOM'a yazilan govde. `checkActiveOrder` 3 saniyede bir calisiyor ve
+// eskiden her seferinde karti bastan kuruyordu. Iki sonucu vardi:
+//
+//   - `.tracking-scroll-list` icindeki kaydirma her 3 saniyede basa doner;
+//     adisyonu acip listeyi okumaya calisan musteri surekli yukari atilirdi
+//     (olculdu: scrollTop 120 -> 0).
+//   - Hicbir sey degismemisken bile 45 KB HTML yeniden ayristirilir.
+//
+// Uretilen govde bir oncekiyle ayniysa DOM'a hic dokunulmuyor. Govde gercekten
+// degistiginde de kaydirma konumu korunuyor.
+let lastTrackingHTML = '';
+
+function applyTrackingHTML(container, html) {
+    if (html === lastTrackingHTML) return;
+
+    const oncekiListe = container.querySelector('.tracking-scroll-list');
+    const kaydirma = oncekiListe ? oncekiListe.scrollTop : 0;
+
+    container.innerHTML = html;
+    lastTrackingHTML = html;
+
+    if (kaydirma > 0) {
+        const yeniListe = container.querySelector('.tracking-scroll-list');
+        if (yeniListe) yeniListe.scrollTop = kaydirma;
+    }
+}
+
 function renderOrderTrackingUI() {
     const container = document.getElementById('orderTrackingContainer');
     if (!container) return;
@@ -1877,6 +1926,7 @@ function renderOrderTrackingUI() {
     const allOrders = state.activeOrders && state.activeOrders.length > 0 ? state.activeOrders : (state.currentOrder ? [state.currentOrder] : []);
     if (allOrders.length === 0) {
         container.style.display = 'none';
+        lastTrackingHTML = '';
         return;
     }
 
@@ -1902,8 +1952,8 @@ function renderOrderTrackingUI() {
 
     // KAPANABİLİR / AÇILABİLİR KART KONTROLÜ (KAPALI HALDE)
     if (isTrackingCollapsed) {
-        container.innerHTML = `
-            <div class="tracking-card" style="padding: 10px 14px; cursor: pointer; border-radius: 14px;" onclick="toggleTrackingUI()">
+        applyTrackingHTML(container, `
+            <div class="tracking-card tracking-toggle" style="padding: 10px 14px; cursor: pointer; border-radius: 14px;" onclick="toggleTrackingUI()">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                     <div style="display:flex; align-items:center; gap: 8px;">
                         <span style="font-size: 1.1rem;">📋</span>
@@ -1914,7 +1964,7 @@ function renderOrderTrackingUI() {
                     <span>${chevronDownSVG}</span>
                 </div>
             </div>
-        `;
+        `);
         return;
     }
 
@@ -2101,7 +2151,7 @@ function renderOrderTrackingUI() {
             </div>
 
             <!-- KUTUCUKLARIN SAĞ ALTTAKİ KAPANIR OK BUTONU -->
-            <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 6px; cursor: pointer;" onclick="toggleTrackingUI()">
+            <div class="tracking-toggle" style="display: flex; justify-content: space-between; align-items: center; padding-top: 6px; cursor: pointer;" onclick="toggleTrackingUI()">
                 <span style="font-size: 0.78rem; color: #94a3b8; font-weight: 700;">💡 Adisyonu küçültmek için tıklayın</span>
                 <span style="padding: 4px;" title="Adisyonu Gizle">
                     ${chevronUpSVG}
@@ -2110,12 +2160,13 @@ function renderOrderTrackingUI() {
         </div>
     `;
 
-    container.innerHTML = html;
+    applyTrackingHTML(container, html);
 }
 
 function dismissTrackingUI() {
     state.currentOrder = null;
     document.getElementById('orderTrackingContainer').style.display = 'none';
+    lastTrackingHTML = '';
 }
 
 function showToast(message) {
