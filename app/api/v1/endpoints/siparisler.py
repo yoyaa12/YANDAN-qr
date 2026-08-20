@@ -32,14 +32,19 @@ async def create_siparis(
     service: SiparisService = Depends(),
     actor: StaffPrincipal | dict = Depends(get_current_user_or_customer)
 ):
+    customer_session_id = None
     if isinstance(actor, dict):
         if actor["masa_id"] != data.masa_id:
             raise HTTPException(
                 status_code=403,
                 detail="Bu oturum ile sadece yetkili olduğunuz masaya sipariş verebilirsiniz."
             )
+        # Siparişin sahibi doğrulanmış oturumdan belirlenir. İstek gövdesinde
+        # böyle bir alan yok ve olmamalı: istemci "bu sipariş şu kişinin" diye
+        # bir iddiada bulunamaz (AGENTS.md §10).
+        customer_session_id = actor.get("id")
 
-    full_order = await service.create_siparis(data)
+    full_order = await service.create_siparis(data, customer_session_id=customer_session_id)
     return {"status": "success", "message": "Sipariş oluşturuldu.", "siparis": full_order}
 
 

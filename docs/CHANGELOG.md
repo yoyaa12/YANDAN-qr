@@ -2458,3 +2458,462 @@ aileden: ekrandaki sayı gerçeği yansıtmıyordu.
 - Gerçek veri üzerinde manuel tur: masa 1'den garson onaylı 1 çorba gönder,
   yan masada stoğun canlı düştüğünü gör, masa 1'i kasadan zorla kapat ve
   `Urunler.stok_miktari` değerinin geri yükseldiğini SQL ile doğrula.
+
+---
+
+### 2026-08-19 (2) - Kısmi adisyon aktarımı, kasa tablo hizalaması, fiş ödeme dökümü
+
+#### Summary
+
+Manuel test turunun ikinci partisi.
+
+1. **"Seçili Ürünleri Taşı" bir yanılsamaydı.** Onay düğmesi seçimden bağımsız
+   olarak `/api/masalar/move` çağırıyor, yani her zaman masanın TAMAMINI
+   taşıyordu. Kutucukların değeri hiçbir isteğe konmuyordu; zaten
+   konulamazdı, çünkü `SiparisDetayResponse` satır kimliğini döndürmüyordu ve
+   kutucuklar liste sırasını taşıyordu. Yeni `POST /api/masalar/move-items`
+   ucu ile gerçek kısmi aktarım eklendi.
+2. **Kasa adisyon tablosunda sayısal sütunlar dardı**; dört haneli tutarın son
+   karakteri kırpılıyordu. "Ayrıntılar" düğmesi ürün adının hemen ardında
+   aktığı için de her satırda başka bir yerde duruyordu.
+3. **Fişteki "Önceden Ödenen" satırı iki ayrı olayı topluyordu.** Sipariş
+   anında kartla ödenen 180 TL ile kasada henüz alınan 85 TL tek satırda
+   265 TL olarak görünüyor, müşteri bunu "265 TL'yi önceden ödemişim" diye
+   okuyordu.
+4. **İlk sipariş kod ekranının metni yanıltıcıydı.** Adisyon kapandıktan sonra
+   aynı müşteriden kod isteniyor (kural gereği), ama ekran "İlk siparişinizi
+   mutfağa iletebilmemiz için" diyordu.
+
+#### Files created
+
+- `tests/test_partial_table_transfer.py`
+- `tests/frontend/kasa_transfer_and_layout.test.cjs`
+
+#### Files modified
+
+- `app/schemas/orders.py` - `SiparisDetayResponse.id` eklendi (Optional).
+  Kasadaki kalem aktarımı satırı `SiparisDetaylari.id` ile adresliyor; ürün adı
+  + adet benzersiz değil.
+- `app/schemas/tables.py` - `MoveMasaItemsModel` eklendi
+  (`from_masa_id`, `to_masa_id`, `detay_ids`; 1-200 kalem).
+- `app/repositories/siparis_repo.py` - `get_movable_detail_rows()`,
+  `reassign_detaylar_to_siparis()`, `move_single_order_to_masa()`,
+  `sync_siparis_total()`. Taşınabilir küme `move_orders_between_masalar` ile
+  birebir aynı (iptal ve kapatılmış hariç), böylece iki taşıma yolu birbirinden
+  sapmaz. Toplam istemciden alınmaz, kalemlerden `SUM(ara_toplam)` ile
+  türetilir.
+- `app/services/siparis_service.py` - `move_masa_items()`. Seçilen her kalem
+  kimliğinin gerçekten kaynak masaya ait olduğu doğrulanır (AGENTS.md §19);
+  bir siparişin tüm kalemleri seçilmişse başlık taşınır, bir kısmı seçilmişse
+  sipariş bölünür; masanın tamamı seçilmişse mevcut `move_masa()` yoluna
+  devredilir (müşteri oturumları ve `TABLE_MOVES_MAP` yönlendirmesi de taşınsın
+  diye). Stok hareket etmez.
+- `app/api/v1/endpoints/masalar.py` - `POST /api/masalar/move-items`
+  (`table_operator` yetkisi: admin, garson, kasa).
+- `static/js/staff_auth.js` - yeni uç staff token allowlist'ine eklendi.
+  Listede olmayan uç sessizce 401 alırdı.
+- `static/js/kasa.js` - `getTransferableItems()` ayrıldı;
+  `renderTransferItemsList()` kutucuk değeri olarak `item.id` kullanıyor ve
+  kimlik gelmezse seçim göndermeden uyarıyor; `confirmVisualTableTransfer()`
+  sekmeye göre uç seçiyor, boş seçimi reddediyor ve başarısız yanıtta sunucunun
+  gerekçesini gösteriyor. Adisyon tablosunda sayısal hücreler ortak
+  `ticket-num-cell` sınıfına alındı, sütun genişlikleri büyütüldü
+  (Adet 56 / Fiyat 104 / Durum 172 / Toplam 126 px). "Ayrıntılar" düğmesi ürün
+  adı kutusundan çıkarılıp hücrenin sağ ucuna sabitlendi. Fiş ödeme dökümü
+  "ÖDEME BİLGİLERİ" başlığı altında ikiye ayrıldı.
+- `static/css/style.css` - `.ticket-item-cell`, `.ticket-item-main`,
+  `.ticket-num-cell` eklendi; `.btn-ayrintilar-chip` sabit genişlikli
+  (104px, `flex-shrink: 0`) - etiket "🔍 Ayrıntılar" ile "▲ Gizle" arasında
+  değiştiği için genişlik sabit olmazsa düğme her tıklamada yerinden oynuyordu.
+- `templates/menu.html` - ilk sipariş kod ekranının metni "yeni bir adisyon
+  açılıyor" olarak düzeltildi ve hesabı kapananlar için ek açıklama eklendi.
+  `app.js?v=87`, `style.css?v=74`.
+- `templates/kasa.html` - `kasa.js?v=64`, `style.css?v=24`, `staff_auth.js?v=4`.
+- `templates/garson.html` - `style.css?v=6`, `staff_auth.js?v=3`.
+- `templates/admin.html` - `style.css?v=1001`, `staff_auth.js?v=4`.
+- `templates/mutfak.html` - `staff_auth.js?v=4`.
+- `tests/frontend/stock_and_billing_contract.test.cjs` - fiş testi yeni ödeme
+  dökümüne göre güncellendi.
+
+#### Files deleted
+
+- None
+
+#### Database changes
+
+- None. Yeni uç mevcut `Siparisler` / `SiparisDetaylari` tablolarını okuyup
+  günceller; kolon eklenmedi.
+
+#### Migration requirements
+
+- None.
+
+#### API changes
+
+- **Yeni:** `POST /api/masalar/move-items`
+  `{from_masa_id, to_masa_id, detay_ids: [int]}` ->
+  `{status, message}`. Yetki: `ADMIN | WAITER | CASHIER`.
+  400: aynı masa / boş seçim. 403: kalem bu masaya ait değil. 404: taşınacak
+  kalem yok.
+- **Değişti:** `SiparisResponse.detaylar[].id` alanı eklendi (Optional).
+  Ek alan olduğu için mevcut istemcileri bozmaz.
+
+#### Authentication changes
+
+- None.
+
+#### Authorization changes
+
+- Yeni uç `table_operator` bağımlılığı ile korunuyor. Ayrıca servis katmanında
+  object-level kontrol var: gönderilen her `SiparisDetaylari.id` kaynak masanın
+  taşınabilir satırları arasında olmalı. Aksi halde geçerli bir kasa tokenı ile
+  başka masanın hesabı bölünebilirdi.
+
+#### Test changes
+
+- `tests/test_partial_table_transfer.py`: 17 yeni Python testi. Bölme, başlık
+  taşıma, tam seçimde masa taşımaya devretme, yabancı kalem kimliğinin
+  reddi, tekrarlı kimliklerin bir kez sayılması, stoğun ellenmemesi, kaynak
+  masanın oturumlarının korunması.
+- `tests/frontend/kasa_transfer_and_layout.test.cjs`: 16 yeni frontend testi.
+  `confirmVisualTableTransfer` sahte DOM ve sahte `authFetch` ile gerçekten
+  çalıştırılıyor; hangi uca hangi gövdeyle gittiği ölçülüyor. Sütun
+  genişlikleri ve düğme hizalaması da sabitlendi.
+
+#### Tests executed
+
+- `python -m unittest discover -s tests`
+- `node --test "tests/frontend/**/*.test.cjs"`
+- Mutation run: (a) `isItemTransfer` sabit `false` yapıldı (eski hata şekli),
+  (b) servisteki sahiplik kontrolü (`unknown`) devre dışı bırakıldı.
+
+#### Test results
+
+- Python: **228/228 PASSED** (211 -> 228).
+- Frontend: **84/84 PASSED** (68 -> 84).
+- Mutation run: (a) 3 frontend testi FAILED, (b)
+  `test_a_detail_id_from_another_table_is_refused` FAILED. Kaynaklar geri
+  alındı, suite yeniden yeşil.
+
+#### Verification performed
+
+- `confirmVisualTableTransfer` eski hâlinde `selectedTransferType` değişkenine
+  hiç bakmıyordu; `renderTransferItemsList` kutucuk değeri olarak
+  `item.id || idx` yazıyor ve `item.id` API yanıtında bulunmadığı için her
+  zaman liste sırası gönderiliyordu. İkisi birlikte sekmeyi tamamen işlevsiz
+  bırakıyordu.
+- Ekran görüntüsündeki fiş doğrulandı: 265 TL "Önceden Ödenen" değeri
+  aritmetik olarak doğruydu (180 sipariş anında + 85 kasada), yanlış olan
+  etiketti.
+
+#### Security impact
+
+- Yeni uç yeni bir yetki sınıfı açmıyor; masa taşıma zaten aynı rollerde.
+  Kalem kimliği artık istemciye dönüyor, ancak kimlik bilmek yetki değil:
+  sunucu her kimliğin kaynak masaya ait olduğunu doğruluyor.
+- `detay_ids` üst sınırı (200) tek istekle tüm tabloyu tarama denemesini
+  sınırlar.
+
+#### Architectural decisions
+
+- **Kısmi aktarımda sipariş BÖLÜNÜR, kalem kopyalanmaz.** Hedef masada aynı
+  ödeme/sipariş durumuna sahip yeni bir başlık açılır ve satırlar oraya
+  taşınır. Böylece toplam para sabit kalır, iki başlığın toplamı da
+  kalemlerinden türetilir.
+- **Bir siparişin tüm kalemleri seçilmişse başlık taşınır.** Bölmek gereksiz
+  yere yeni fiş numarası üretir ve geçmişi kopartırdı.
+- **Masanın tamamı seçilmişse mevcut `move_masa()` yoluna devredilir.** Kalem
+  kalem taşımak müşteri oturumlarını ve telefon yönlendirmesini geride
+  bırakırdı.
+- **Kısmi aktarımda kaynak masanın müşteri oturumları korunur.** Orada oturan
+  grup hâlâ masada; oturumları iptal etmek telefonlarını sebepsiz kilitlerdi.
+
+#### Unresolved issues
+
+- Kısmi aktarım kalem BÖLMEZ: "3 çorbanın 1'ini taşı" desteklenmiyor, satırın
+  tamamı gider. Adet bazlı bölme ayrı bir karar (fiyatlandırma ve mutfak fişi
+  etkisi var).
+- Taşınan siparişin `device_id` alanı korunuyor, yani kalemi ısmarlayan
+  telefon artık kendi masasında o kalemi görmüyor. Kısmi bölmenin doğal
+  sonucu, ama Madde 4'te tartışılan "kim ne söyledi" görünümü uygulanırsa
+  birlikte ele alınmalı.
+- Fişte ödeme yöntemi kırılımı (hangi tutar nakit, hangisi kart) hâlâ yok;
+  `Siparisler` tablosunda `odeme_yontemi` kolonu bulunmuyor.
+
+#### Next action
+
+- Manuel tur: masa 4'te iki fiş oluştur, kasadan "Seçili Ürünleri Taşı" ile
+  tek kalemi masa 6'ya aktar, iki masanın toplamlarının kalemlerle uyuştuğunu
+  ve `SiparisDetaylari` satırının yeni `siparis_id` aldığını SQL ile doğrula.
+- Madde 4 (cihaz bazlı sipariş görünürlüğü) kullanıcı kararı bekliyor; karar
+  verilirse `IMPLEMENTATION_STATUS.md` blocker listesine işlenecek.
+
+---
+
+### 2026-08-19 (3) - F7 masa taşımaya kalem seçimi, tek taşıma yolu, adisyon tablosu okunabilirliği
+
+#### Summary
+
+Kullanıcı "seçili ürünleri taşıyamıyorum" diye bildirdi. 2026-08-19 (2)
+partisinde yalnızca **görsel taşıma modu** düzeltilmişti; ikinci bir giriş
+noktası olan **F7 "MASA TAŞI"** modalinde ürün seçimi diye bir şey hiç yoktu.
+Bu modal hedef masayı sorup her zaman masanın tamamını taşıyordu ve başarısız
+yanıtı tamamen yutuyordu.
+
+Ayrıca adisyon tablosunda: kısmi ödeme rozeti sütuna sığmayıp "1 ÖD..." diye
+kırpılıyor, "Ayrıntılar" düğmesi açıldığında küçülüyor ve sayısal sütunlar
+bitişik durduğu için hangi sayının hangi başlığa ait olduğu okunmuyordu.
+
+#### Files created
+
+- None
+
+#### Files modified
+
+- `static/js/kasa.js`
+  - `performTableTransfer(from, to, detayIds)` ve
+    `readCheckedTransferIds(containerId)` eklendi. **İki modal da artık tek
+    yoldan geçiyor**; aynı davranışın iki kopyası, birinin sessizce sapması
+    demekti (nitekim öyle oldu).
+  - `renderTransferItemsList()` -> `renderTransferItemsInto(containerId, masaId,
+    preCheckedIds)`. İki modal aynı listeyi kullanıyor.
+  - `setMoveScope()` eklendi; F7 modaline "Tüm Masa / Seçili Ürünler"
+    sekmeleri geldi.
+  - `getSelectedDetailIds()`: adisyon tablosunda seçili satırların arkasındaki
+    `SiparisDetaylari.id` kümesi. F7 modali seçim varsa doğrudan "Seçili
+    Ürünler" ile açılıyor ve o kalemler işaretli geliyor. Kasiyerin solda
+    yaptığı seçim ile taşıma seçimi artık aynı şey.
+  - Gruplanmış satır `detay_ids` taşıyor (`groupedMap[...].detay_ids`).
+  - `confirmMoveTable()` artık başarısız yanıtı yutmuyor, sunucunun gerekçesini
+    gösteriyor; kısmi aktarımda kasiyer kaynak masada kalıyor, tam taşımada
+    hedef masaya geçiyor.
+  - Kısmi ödeme rozeti kısaltıldı: `◐ 1/6 ÖDENDİ`. Uzun biçim
+    ("✅ 1 ÖDENDİ · ⏳ 5 AÇIK") 150px sütuna sığmıyordu. Tahsil edilecek tutar
+    zaten Toplam sütununun altında "Kasada: X ₺" olarak duruyor.
+  - Sütun genişlikleri: Adet 64 / Fiyat 116 / Durum 150 / Toplam 140 px.
+- `templates/kasa.html` - F7 modaline kapsam sekmeleri ve kalem listesi
+  kapsayıcısı (`moveTableItemsContainer`) eklendi. `kasa.js?v=65`,
+  `style.css?v=25`.
+- `static/css/style.css`
+  - `.btn-ayrintilar-chip` sabit kutu: `width: 112px; height: 26px;
+    box-sizing: border-box`. Yalnızca genişliği sabitlemek yetmiyordu; "▲ Gizle"
+    daha kısa olduğu için düğme açıkken küçülüyor ve kullanıcı aynı noktaya
+    ikinci kez tıkladığında ıskalıyordu.
+  - `.ticket-num-cell` sütunlarına ince ayırıcı çizgi ve 12px yatay dolgu.
+- `tests/frontend/kasa_transfer_and_layout.test.cjs` - yeni yapıya göre
+  yeniden yazıldı, F7 yolu için testler eklendi.
+- `tests/frontend/stock_and_billing_contract.test.cjs` - kısalan rozet.
+
+#### Database changes / Migration / Authentication / Authorization
+
+- None. Yeni uç yok; F7 modali 2026-08-19 (2) partisinde eklenen
+  `POST /api/masalar/move-items` ucunu kullanıyor.
+
+#### Test changes
+
+- `tests/frontend/kasa_transfer_and_layout.test.cjs`: 24 test (16 -> 24).
+  `confirmVisualTableTransfer` ve `confirmMoveTable` sahte DOM + sahte
+  `authFetch` ile gerçekten çalıştırılıyor; hangi uca hangi gövdeyle gittiği,
+  kısmi aktarımda kasiyerin hangi masada kaldığı ve adisyon seçiminin
+  devralınması ölçülüyor.
+
+#### Tests executed / results
+
+- `python -m unittest discover -s tests`: **228/228 PASSED**.
+- `node --test "tests/frontend/**/*.test.cjs"`: **92/92 PASSED** (84 -> 92).
+
+#### Verification performed
+
+- Kullanıcının ekran görüntüsü kasa.js v=63 ile alınmıştı: batch-1 özellikleri
+  ("Kasada: 425.0", kısmi ödeme rozeti) görünüyor, batch-2 özellikleri (sütun
+  genişlikleri, düğme hizası) görünmüyordu. CSS dosyası ayrıca söz dizimi
+  açısından doğrulandı (brace dengesi ve yorum kapanışları), çakışan/ikinci bir
+  `.btn-ayrintilar-chip` tanımı olmadığı görüldü.
+- `confirmMoveTable`'ın eski hâli `res.ok` değilse hiçbir şey yapmıyordu:
+  modal açık kalıyor, kasiyer nedenini öğrenemiyordu.
+
+#### Architectural decisions
+
+- **Tek taşıma yolu.** İki giriş noktası aynı `performTableTransfer` üzerinden
+  gidiyor. Bu partinin bildirilen hatası doğrudan kopyalanmış davranışın
+  sonucuydu.
+- **Kasiyerin adisyon tablosundaki seçimi, taşıma seçimidir.** İki ekranda iki
+  farklı "seçim" kavramı olması kullanıcının hatayı bildirme biçiminden de
+  belli oldu ("ürünleri tek tek seçmeme rağmen").
+
+#### Unresolved issues
+
+- Değişmedi: kalem adet bazında bölünemiyor; fişte ödeme yöntemi kırılımı yok.
+- `Siparisler` tablosunda müşteri oturumu kimliği tutulmuyor; cihaz bazlı
+  görünürlük (blocker 7) hâlâ kullanıcı kararı bekliyor.
+
+#### Next action
+
+- Tarayıcıda sert yenileme (Ctrl+F5) ile doğrulama: F7 -> "Seçili Ürünler" ->
+  tek kalem -> hedef masa. İki masanın toplamları kalemleriyle uyuşmalı.
+
+---
+
+### 2026-08-19 (4) - Sipariş sahipliği: `Siparisler.customer_session_id` ve "Benim Siparişlerim" görünümü
+
+#### Summary
+
+Masadaki her telefon masanın tamamını görüyordu. Kullanıcı bunu kişi bazına
+ayırmak istedi ve şema değişikliğini onayladı.
+
+Kritik nokta: ayrımın `device_id` üzerine kurulmaması. O alan istek gövdesinden
+geliyor (`SiparisOlusturModel.device_id`), yani bir cihaz başkasının kimliğini
+gönderebilir; "bu siparişi kim verdi" sorusunun cevabı olarak güvenilemez
+(AGENTS.md §10). `CustomerSessions` satırının kimliği ise sunucu tarafından
+doğrulanmıştır: istemci yalnızca token gönderir, token hash'lenip veritabanında
+aranır ve oturum oradan çözülür.
+
+Bu yüzden sahiplik `Siparisler.customer_session_id` üzerine kuruldu ve controller
+bu değeri istek gövdesinden değil `get_current_user_or_customer` sonucundan
+alıyor.
+
+#### Files created
+
+- `scripts/add_customer_session_to_orders.py` - idempotent migration.
+- `tests/test_order_ownership.py`
+- `tests/frontend/customer_order_ownership.test.cjs`
+
+#### Files modified
+
+- `app/repositories/siparis_repo.py` - `create_siparis(..., customer_session_id)`;
+  INSERT yeni kolonu yazıyor.
+- `app/services/siparis_service.py`
+  - `create_siparis(data, customer_session_id=None)`. Değer istek gövdesinden
+    DEĞİL controller'dan gelir.
+  - `_map_to_siparis_response(order_dict, viewer_session_id=None)` - `is_mine`
+    burada, veritabanındaki kimlik ile hesaplanır. `viewer_session_id` yoksa
+    (personel yolları) alan `None` bırakılır: "hayır" değil, "bu soru
+    sorulmadı".
+  - `get_masa_aktif_siparis(masa_id, viewer_session_id=None)` - yanıt masanın
+    TAMAMINI döndürmeye devam eder, ek olarak `benim_toplamim` hesaplar.
+  - Tekrarlı istek penceresinin anahtarına `customer_session_id` eklendi: aynı
+    masada iki kişi aynı anda aynı ürünü söylediğinde bu iki ayrı siparişdir,
+    tekrar gönderim değil.
+- `app/schemas/orders.py` - `SiparisResponse.is_mine: Optional[bool]`. Ham
+  `customer_session_id` bilinçli olarak dışarı verilmez; masadaki bir müşterinin
+  diğerlerinin oturum kimliklerini görmesi için hiçbir neden yok.
+- `app/api/v1/endpoints/siparisler.py` - `customer_session_id = actor.get("id")`.
+- `app/api/v1/endpoints/masalar.py` - `viewer_session_id = actor.get("id")`.
+- `static/js/app.js` - `orderViewMode` (localStorage'da kalıcı),
+  `window.setOrderViewMode`, `renderOrderTrackingUI` içinde filtre + sekmeler +
+  "Bu cihazdan verilen" satırı + kişisel görünüm boşsa açıklayıcı durum.
+  `checkActiveOrder` `state.benimToplamim` saklıyor.
+- `templates/menu.html` - `app.js?v=88`.
+- `docs/PROJE_MIMARI_SUNUM.md` - ER diyagramına yeni kolon.
+- `docs/IMPLEMENTATION_STATUS.md` - blocker 7 RESOLVED, ilişki listesi.
+- `tests/test_customer_session_authorization.py` - test double yeni imzaya
+  uyarlandı; controller'ın oturum kimliğini gerçekten geçirdiğini ve reddedilen
+  istekte hiç geçirmediğini doğrulayan iki test eklendi.
+
+#### Database changes
+
+- `Siparisler` tablosuna `customer_session_id INT NULL` eklendi.
+- `FK_Siparisler_CustomerSessions` (CASCADE yok: oturum kaydı kaldırılırsa
+  siparişin de gitmesi istenmez).
+- `IX_Siparisler_customer_session_id`.
+
+#### Migration requirements
+
+- `python scripts/add_customer_session_to_orders.py`
+- Betik idempotenttir; kolon/FK/index zaten varsa atlar.
+- **Çalıştırıldı ve doğrulandı** (canlı `RestoranQRDB`): kolon var, nullable,
+  mevcut satırlarda `NULL`.
+- Geri alma gerekirse: `ALTER TABLE Siparisler DROP CONSTRAINT
+  FK_Siparisler_CustomerSessions;` ardından `DROP INDEX ...` ve
+  `ALTER TABLE Siparisler DROP COLUMN customer_session_id;`
+
+#### API changes
+
+- `SiparisResponse.is_mine: bool | null` eklendi. Ek alan olduğu için mevcut
+  istemcileri bozmaz. `null` = "bu soru sorulmadı" (personel yolları).
+- `GET /api/masalar/{id}/aktif-siparis` yanıtına `benim_toplamim` eklendi
+  (müşteri oturumu yoksa `null`).
+- İstek sözleşmeleri **değişmedi**: sahiplik için istemciden hiçbir yeni alan
+  alınmıyor ve alınmamalı.
+
+#### Authentication changes
+
+- None.
+
+#### Authorization changes
+
+- Yeni bir yetki kuralı **yok**. `is_mine` bir görünüm filtresidir; hiçbir
+  işlemin izni buna bağlanmadı. Bir sonraki adımda (örneğin "kendi siparişini
+  iptal edebilsin") bu alan artık güvenle kullanılabilir, çünkü kaynağı
+  doğrulanmış oturumdur - ama bu ayrı bir karardır.
+
+#### Test changes
+
+- `tests/test_order_ownership.py`: 19 test. Kimliğin yazılması,
+  `device_id` ile karışmaması, `is_mine`'ın yalnızca eşleşmede `True` olması,
+  eski (NULL) kayıtların asla "benim" görünmemesi, personel yollarında `None`
+  kalması, ham kimliğin sızmaması, istemcinin gönderdiği sahte `is_mine`
+  iddiasının ezilmesi, `benim_toplamim` aritmetiği ve iki oturumun tekrarlı
+  istek penceresinde birbirine karışmaması.
+- `tests/frontend/customer_order_ownership.test.cjs`: 13 test.
+  `renderOrderTrackingUI` sahte DOM ile gerçekten çalıştırılıyor; hangi
+  siparişin listelendiği ve hangi toplamın yazıldığı ölçülüyor.
+- `tests/test_customer_session_authorization.py`: +2 test.
+
+#### Tests executed
+
+- `python -m unittest discover -s tests`
+- `node --test "tests/frontend/**/*.test.cjs"`
+- Canlı veritabanına salt-okunur doğrulama sorgusu.
+- Mutation run: (a) `_map_to_siparis_response` içindeki `is_mine` hesabı
+  kaldırıldı, (b) kişisel görünümde adisyon toplamı da filtreye bağlandı.
+
+#### Test results
+
+- Python: **249/249 PASSED** (230 -> 249).
+- Frontend: **105/105 PASSED** (92 -> 105).
+- Mutation run: (a) 4 Python testi FAILED, (b) 2 frontend testi FAILED.
+  Kaynaklar geri alındı, suite yeniden yeşil.
+
+#### Verification performed
+
+- Migration canlı veritabanında çalıştırıldı; `sys.columns` üzerinden kolonun
+  varlığı ve nullable olduğu, mevcut siparişlerde `NULL` kaldığı doğrulandı.
+- `get_current_customer` dönüşünün `id` alanını taşıdığı
+  (`get_active_customer_session` `SELECT id, masa_id, device_id, expires_at`)
+  koddan doğrulandı; controller testinde bu kimliğin servise ulaştığı ölçüldü.
+
+#### Security impact
+
+- Olumlu: "bu siparişi kim verdi" sorusunun ilk kez taklit edilemez bir cevabı
+  var. Önceki tek aday olan `device_id` istemci beyanıydı.
+- Yeni sızıntı yok: ham oturum kimliği yanıtta yer almıyor, yalnızca boolean
+  `is_mine` dönüyor.
+- Yeni bir güven sınırı **kurulmadı**; alan şu an sadece görünüm filtreliyor.
+
+#### Architectural decisions
+
+- **Sahiplik oturumdan, cihazdan değil.** `device_id` yerinde kalıyor ama
+  yalnızca cihaz yasaklama gibi kaba işler için.
+- **Kişisel görünüm bir filtredir, bir hesap değil.** Sunucu masanın tamamını
+  dönmeye devam eder ve adisyon toplamı her iki sekmede de masanın tamamıdır.
+  Kişisel tutar ayrı ve daha küçük punto ile gösterilir.
+- **Eski kayıtlara veri uydurulmadı.** `NULL` "bilinmiyor" demektir ve
+  "Benim Siparişlerim" altında görünmez.
+- **`is_mine = None` ile `False` ayrı anlamlar taşır.** İlki "bu soru
+  sorulmadı" (personel yolu), ikincisi "hayır".
+
+#### Unresolved issues
+
+- Oturum ≠ kişi: iki sekme, temizlenen localStorage veya paylaşılan telefon
+  eşlemeyi bozar ve düzeltecek bir giriş mekanizması yok.
+- Kişi bazlı ÖDEME hâlâ mümkün değil; gerçek bir kişi/adisyon varlığı gerekir.
+- `Siparisler.odeme_yontemi` kolonu hâlâ yok (ayrı karar).
+
+#### Next action
+
+- Manuel tur: aynı masanın QR'ını normal ve gizli pencerede aç, ikisinden de
+  sipariş ver. Her cihazın "Benim Siparişlerim" sekmesi yalnızca kendi
+  siparişini, "Masanın Tümü" ve adisyon toplamı ikisini birden göstermeli.
+  Ardından SQL ile iki `Siparisler` satırının farklı `customer_session_id`
+  taşıdığını doğrula.

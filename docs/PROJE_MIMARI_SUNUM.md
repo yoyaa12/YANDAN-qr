@@ -248,6 +248,7 @@ erDiagram
         nvarchar siparis_durumu
         nvarchar garson_adi
         nvarchar device_id
+        int customer_session_id FK "hangi oturum verdi"
     }
     SiparisDetaylari {
         int id PK

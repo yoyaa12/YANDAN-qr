@@ -60,6 +60,11 @@ class DurumGuncelleModel(BaseModel):
 
 
 class SiparisDetayResponse(BaseModel):
+    # `SiparisDetaylari.id`. Kasadaki "seçili ürünleri taşı" akışı kalemi tek tek
+    # adreslemek zorunda: ürün adı + adet benzersiz değil, aynı üründen iki ayrı
+    # satır olabiliyor. Sunucu yine de gönderilen her id'nin gerçekten kaynak
+    # masaya ait olduğunu doğrular; id bilmek yetki anlamına gelmez.
+    id: Optional[int] = None
     urun_id: int
     urun_adi: str
     adet: int
@@ -80,6 +85,13 @@ class SiparisResponse(BaseModel):
     olusturma_tarihi: Optional[str] = None
     garson_adi: Optional[str] = None
     device_id: Optional[str] = None
+    # Bu siparişi isteği yapan müşteri oturumunun verip vermediği. Sunucu
+    # hesaplar; istemcinin gönderdiği hiçbir alana bakılmaz. Personel
+    # yollarında ve oturumu bilinmeyen eski kayıtlarda `None` kalır.
+    #
+    # Ham `customer_session_id` bilinçli olarak dışarı verilmez: masadaki bir
+    # müşterinin diğerlerinin oturum kimliklerini görmesi için hiçbir neden yok.
+    is_mine: Optional[bool] = None
     detaylar: List[SiparisDetayResponse] = Field(default_factory=list)
 
 

@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -19,6 +19,19 @@ class MasaResponse(BaseModel):
 class MoveMasaModel(BaseModel):
     from_masa_id: int = Field(gt=0)
     to_masa_id: int = Field(gt=0)
+
+
+class MoveMasaItemsModel(BaseModel):
+    """Adisyonun bir bölümünü başka masaya aktarma isteği.
+
+    ``detay_ids`` `SiparisDetaylari.id` listesidir. Üst sınır, tek istekle
+    masanın tamamını tarayan denemeleri sınırlamak için; gerçek bir masanın
+    kalem sayısının çok üzerinde.
+    """
+
+    from_masa_id: int = Field(gt=0)
+    to_masa_id: int = Field(gt=0)
+    detay_ids: List[int] = Field(min_length=1, max_length=200)
 
 
 class VerifyQRModel(BaseModel):

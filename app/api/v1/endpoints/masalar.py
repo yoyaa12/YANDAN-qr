@@ -14,6 +14,7 @@ from app.services.siparis_service import SiparisService
 from app.schemas.common import GenelBasariliResponse
 from app.schemas.tables import (
     MasaResponse,
+    MoveMasaItemsModel,
     MoveMasaModel,
     QRDogrulamaResponse,
     TahsilatModel,
@@ -47,13 +48,21 @@ async def get_masa_aktif_siparis(
     siparis_service: SiparisService = Depends(),
     actor: StaffPrincipal | dict = Depends(get_current_user_or_customer)
 ):
+    viewer_session_id = None
     if isinstance(actor, dict):
         if actor["masa_id"] != masa_id:
             raise HTTPException(
                 status_code=403,
                 detail="Bu masanın siparişlerini görüntüleme yetkiniz yok."
             )
-    return siparis_service.get_masa_aktif_siparis(masa_id)
+        # "Benim Siparişlerim" görünümü bu kimliğe dayanır. Doğrulanmış
+        # oturumdan geldiği için bir cihaz başkasının siparişlerini kendi
+        # siparişiymiş gibi listeleyemez.
+        viewer_session_id = actor.get("id")
+
+    return siparis_service.get_masa_aktif_siparis(
+        masa_id, viewer_session_id=viewer_session_id
+    )
 
 @router.post(
     "/masalar/move",
@@ -63,6 +72,28 @@ async def get_masa_aktif_siparis(
 async def move_masa(data: MoveMasaModel, siparis_service: SiparisService = Depends()):
     await siparis_service.move_masa(data.from_masa_id, data.to_masa_id)
     return GenelBasariliResponse(status="success", message="Masa adisyonu başarıyla taşındı.")
+
+@router.post(
+    "/masalar/move-items",
+    response_model=GenelBasariliResponse,
+    dependencies=[Depends(table_operator)],
+)
+async def move_masa_items(data: MoveMasaItemsModel, siparis_service: SiparisService = Depends()):
+    """Adisyonun yalnızca seçilen kalemlerini başka masaya aktarır.
+
+    Kalem kimlikleri istemciden gelir ve servis katmanı her birinin gerçekten
+    kaynak masaya ait olduğunu doğrular.
+    """
+    result = await siparis_service.move_masa_items(
+        data.from_masa_id, data.to_masa_id, data.detay_ids
+    )
+    mesaj = (
+        "Masa adisyonu başarıyla taşındı."
+        if result.get("full_move")
+        else f"{result.get('moved_detail_count', 0)} ürün seçili masaya aktarıldı."
+    )
+    return GenelBasariliResponse(status="success", message=mesaj)
+
 
 @router.post(
     "/masalar/{masa_id}/clear",

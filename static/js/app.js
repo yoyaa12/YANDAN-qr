@@ -501,6 +501,7 @@ async function checkActiveOrder() {
             state.activeOrders = data.siparisler || [data.siparis];
             state.currentOrder = data.siparis || state.activeOrders[state.activeOrders.length - 1];
             state.genelToplam = data.genel_toplam || state.activeOrders.reduce((sum, o) => sum + (o.toplam_tutar || 0), 0);
+            state.benimToplamim = (typeof data.benim_toplamim === 'number') ? data.benim_toplamim : null;
             renderOrderTrackingUI();
         } else {
             state.activeOrders = [];
@@ -1846,19 +1847,54 @@ window.toggleGroupDetails = function (groupIndex) {
 };
 
 // CANLI SİPARİŞ TAKİP EKRANI (F5 İLE KANANMAZ + SİPARİŞ VERİLEN ÜRÜNLERİN LİSTESİ)
+// "Benim Siparişlerim" / "Masanın Tümü" görünümü.
+//
+// Sunucu her siparişi doğrulanmış müşteri oturumuna göre `is_mine` ile
+// işaretler (`Siparisler.customer_session_id`). Burada yapılan iş yalnızca
+// filtrelemedir. Ödenecek tutar HER ZAMAN masanın tamamıdır: müşteriye sadece
+// kendi kalemlerini gösterip toplamı da ona göre yazmak, hesap geldiğinde
+// sürprize yol açar.
+let orderViewMode = (function () {
+    try {
+        return localStorage.getItem('qr_order_view_mode') === 'mine' ? 'mine' : 'table';
+    } catch (e) {
+        return 'table';
+    }
+})();
+
+window.setOrderViewMode = function (mode) {
+    orderViewMode = (mode === 'mine') ? 'mine' : 'table';
+    try {
+        localStorage.setItem('qr_order_view_mode', orderViewMode);
+    } catch (e) { }
+    renderOrderTrackingUI();
+};
+
 function renderOrderTrackingUI() {
     const container = document.getElementById('orderTrackingContainer');
     if (!container) return;
 
-    const orders = state.activeOrders && state.activeOrders.length > 0 ? state.activeOrders : (state.currentOrder ? [state.currentOrder] : []);
-    if (orders.length === 0) {
+    const allOrders = state.activeOrders && state.activeOrders.length > 0 ? state.activeOrders : (state.currentOrder ? [state.currentOrder] : []);
+    if (allOrders.length === 0) {
         container.style.display = 'none';
         return;
     }
 
     container.style.display = 'block';
 
-    const totalAdisyon = state.genelToplam || orders.reduce((acc, o) => acc + (o.toplam_tutar || 0), 0);
+    // Sunucu sahiplik bilgisini yalnızca doğrulanmış müşteri oturumu için
+    // hesaplar. `is_mine` hiç gelmiyorsa (oturumsuz görüntüleme) sekmeler
+    // gösterilmez; olmayan bir ayrımı varmış gibi sunmak yanıltıcı olur.
+    const ownershipKnown = allOrders.some(o => o.is_mine === true || o.is_mine === false);
+    const myOrders = allOrders.filter(o => o.is_mine === true);
+    const showMine = ownershipKnown && orderViewMode === 'mine';
+    const orders = showMine ? myOrders : allOrders;
+
+    // Toplam her iki görünümde de masanın tamamı.
+    const totalAdisyon = state.genelToplam || allOrders.reduce((acc, o) => acc + (o.toplam_tutar || 0), 0);
+    const myTotal = (typeof state.benimToplamim === 'number')
+        ? state.benimToplamim
+        : myOrders.reduce((acc, o) => acc + (o.toplam_tutar || 0), 0);
     const totalAdisyonStr = (totalAdisyon % 1 === 0) ? totalAdisyon.toFixed(0) : totalAdisyon.toFixed(2);
 
     const chevronDownSVG = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle;"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
@@ -1872,7 +1908,7 @@ function renderOrderTrackingUI() {
                     <div style="display:flex; align-items:center; gap: 8px;">
                         <span style="font-size: 1.1rem;">📋</span>
                         <span style="font-size: 0.92rem; font-weight: 700; color: var(--text-primary);">
-                            Adisyon (${orders.length} Sipariş • ${totalAdisyonStr} ₺)
+                            Adisyon (${allOrders.length} Sipariş • ${totalAdisyonStr} ₺)
                         </span>
                     </div>
                     <span>${chevronDownSVG}</span>
@@ -2009,20 +2045,59 @@ function renderOrderTrackingUI() {
         `;
     });
 
+    const tabButtonStyle = (isActive) => `
+        flex:1; padding:7px 6px; border-radius:8px; font-size:0.8rem; font-weight:800;
+        cursor:pointer; border:1px solid ${isActive ? 'var(--primary)' : 'rgba(255,255,255,0.12)'};
+        background:${isActive ? 'rgba(245,158,11,0.18)' : 'rgba(255,255,255,0.04)'};
+        color:${isActive ? 'var(--primary)' : '#94a3b8'};
+    `;
+
+    const viewTabsHTML = ownershipKnown ? `
+        <div style="display:flex; gap:6px; margin-top:12px;">
+            <button type="button" style="${tabButtonStyle(!showMine)}" onclick="setOrderViewMode('table')">
+                👥 Masanın Tümü
+            </button>
+            <button type="button" style="${tabButtonStyle(showMine)}" onclick="setOrderViewMode('mine')">
+                🙋 Benim Siparişlerim
+            </button>
+        </div>
+    ` : '';
+
+    // Kisisel gorunumde hicbir siparis yoksa kart bos gorunmemeli: neden bos
+    // oldugu ve masanin tamamina nasil donulecegi yazili olmali.
+    const emptyMineHTML = `
+        <div style="text-align:center; padding:18px 8px; color:#94a3b8; font-size:0.85rem; line-height:1.5;">
+            <div style="font-size:1.6rem; margin-bottom:6px;">🙋</div>
+            Bu cihazdan henüz sipariş verilmedi.<br>
+            <span style="font-size:0.78rem; opacity:0.8;">Masadaki diğer siparişler için “Masanın Tümü” sekmesine geçin.</span>
+        </div>
+    `;
+
+    const myTotalStr = (myTotal % 1 === 0) ? myTotal.toFixed(0) : myTotal.toFixed(2);
+    const myTotalHTML = ownershipKnown ? `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top: 6px; font-size:0.82rem; color:#94a3b8;">
+            <span>Bu cihazdan verilen:</span>
+            <span style="font-weight:800; color:#cbd5e1; white-space:nowrap;">${myTotalStr} ₺</span>
+        </div>
+    ` : '';
+
     let html = `
         <div class="tracking-card" style="padding-bottom: 8px;">
             ${currentStatusHTML}
 
+            ${viewTabsHTML}
+
             <!-- MASANIN TÜM ADİSYON DÖKÜMÜ -->
             <div style="margin-top: 12px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px;">
                 <div class="tracking-scroll-list" style="max-height: 230px;">
-                    ${ordersListHTML}
+                    ${ordersListHTML || emptyMineHTML}
                 </div>
 
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.12); padding-top: 10px; font-weight: 800;">
                     <span style="font-size: 0.95rem;">Genel Adisyon Toplamı:</span>
                     <span style="color: #10b981; font-size: 1.15rem; white-space: nowrap;">${totalAdisyonStr} ₺</span>
                 </div>
+                ${myTotalHTML}
             </div>
 
             <!-- KUTUCUKLARIN SAĞ ALTTAKİ KAPANIR OK BUTONU -->

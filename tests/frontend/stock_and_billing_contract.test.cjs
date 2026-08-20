@@ -340,19 +340,31 @@ test('the remaining balance subtracts what was already paid at order time', () =
 });
 
 test('a partly paid row tells the cashier how much of it is still open', () => {
+    // Rozet kısa tutuluyor (sütuna sığması için); tahsil edilecek tutar Toplam
+    // sütununun altında ayrı satır olarak duruyor.
     assert.match(kasaSource, /isPartiallyPaid = \(grp\.paid_adet > 0 && grp\.unpaid_adet > 0\)/);
-    assert.match(kasaSource, /ÖDENDİ · ⏳ \$\{grp\.unpaid_adet\} AÇIK/);
+    assert.match(kasaSource, /\$\{grp\.paid_adet\}\/\$\{grp\.toplam_adet\} ÖDENDİ/);
     assert.match(kasaSource, /Kasada: \$\{openLineTotal\.toFixed\(2\)\}/);
 });
 
-test('the printed receipt shows the remaining balance when part is paid', () => {
+test('the printed receipt breaks payments down instead of lumping them', () => {
+    // Tek satırda toplanan "Önceden Ödenen" yanlış okunuyordu: sipariş anında
+    // kartla ödenen 180 TL ile kasada henüz alınan 85 TL aynı satırda 265 TL
+    // görünüyordu. İkisi ayrı olaydır.
     const receiptBody = kasaSource.slice(
         kasaSource.indexOf('window.printReceiptPreview'),
         kasaSource.indexOf('window.closeModal')
     );
 
-    assert.match(receiptBody, /getActiveMasaPaidBefore\(\)/);
+    assert.match(receiptBody, /ÖDEME BİLGİLERİ/);
+    assert.match(receiptBody, /Sipariş anında ödenen/);
+    assert.match(receiptBody, /Kasada tahsil edilen/);
     assert.match(receiptBody, /KALAN ÖDENECEK/);
+    assert.match(receiptBody, /const paidAtOrderTime = activeMasaPaidFromOrders/);
+    assert.ok(
+        !/<span>Önceden Ödenen:<\/span>/.test(receiptBody),
+        'iki ödemeyi tek satırda toplayan etiket fişe geri basılmamalı'
+    );
 });
 
 // ---------------------------------------------------------------------------

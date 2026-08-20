@@ -95,18 +95,23 @@ class RecordingOrderService:
 
     def __init__(self):
         self.calls = []
+        # Controller'in servise hangi oturum kimligini gecirdigi. "Benim
+        # Siparislerim" gorunumunun dogru kisiye ait olmasi buna bagli.
+        self.viewer_session_ids = []
 
-    def get_masa_aktif_siparis(self, masa_id):
+    def get_masa_aktif_siparis(self, masa_id, viewer_session_id=None):
         self.calls.append(("get_masa_aktif_siparis", masa_id))
+        self.viewer_session_ids.append(viewer_session_id)
         return {
             "has_active": False,
             "siparisler": [],
             "siparis": None,
             "genel_toplam": 0.0,
+            "benim_toplamim": 0.0,
             "alinan_tutar": 0.0,
         }
 
-    async def create_siparis(self, data):  # pragma: no cover - must not be reached
+    async def create_siparis(self, data, customer_session_id=None):  # pragma: no cover
         self.calls.append(("create_siparis", data.masa_id))
         raise AssertionError("create_siparis must not run for a rejected request")
 
@@ -162,6 +167,32 @@ class CustomerSessionRouteAuthorizationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             self.order_service.calls, [("get_masa_aktif_siparis", SESSION_TABLE_ID)]
         )
+
+    async def test_the_verified_session_id_reaches_the_service(self):
+        """"Benim Siparislerim" kimligi dogrulanmis oturumdan gelmelidir.
+
+        Istek govdesinde boyle bir alan yok ve olmamali: istemci "bu siparisler
+        benim" diye bir iddiada bulunamaz (AGENTS.md §10). Controller kimligi
+        `get_current_user_or_customer` sonucundan alir.
+        """
+        status, _ = await asgi_request(
+            self.app,
+            "GET",
+            f"/api/masalar/{SESSION_TABLE_ID}/aktif-siparis",
+            token=CUSTOMER_TOKEN_TABLE_5,
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(self.order_service.viewer_session_ids, [1])
+
+    async def test_a_rejected_request_never_leaks_a_session_id(self):
+        status, _ = await asgi_request(
+            self.app, "GET", f"/api/masalar/{OTHER_TABLE_ID}/aktif-siparis",
+            token=CUSTOMER_TOKEN_TABLE_5,
+        )
+
+        self.assertEqual(status, 403)
+        self.assertEqual(self.order_service.viewer_session_ids, [])
 
     async def test_active_order_of_another_table_is_forbidden(self):
         """The confirmed IDOR: table 5's session must not read table 6."""

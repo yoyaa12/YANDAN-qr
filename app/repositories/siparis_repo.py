@@ -7,12 +7,32 @@ class SiparisRepository:
     def __init__(self, db: DatabaseSession = Depends(get_db)):
         self.db = db
 
-    def create_siparis(self, masa_id: int, siparis_kodu: str, toplam_tutar: float, odeme_durumu: str, siparis_durumu: str, device_id: Optional[str] = None) -> Optional[int]:
-        query = """
-            INSERT INTO Siparisler (masa_id, siparis_kodu, toplam_tutar, odeme_durumu, siparis_durumu, device_id)
-            VALUES (?, ?, ?, ?, ?, ?)
+    def create_siparis(
+        self,
+        masa_id: int,
+        siparis_kodu: str,
+        toplam_tutar: float,
+        odeme_durumu: str,
+        siparis_durumu: str,
+        device_id: Optional[str] = None,
+        customer_session_id: Optional[int] = None,
+    ) -> Optional[int]:
+        """Sipariş başlığını yazar.
+
+        ``device_id`` istemciden gelir ve taklit edilebilir; yalnızca cihaz
+        yasaklama gibi kaba işlemler için tutulur. ``customer_session_id`` ise
+        doğrulanmış oturumdan gelir: "bu siparişi masadaki hangi oturum verdi"
+        sorusunun güvenilebilir tek cevabı budur. Personel tarafından oluşan
+        kayıtlarda NULL kalır.
         """
-        siparis_id = self.db.execute_non_query(query, (masa_id, siparis_kodu, toplam_tutar, odeme_durumu, siparis_durumu, device_id))
+        query = """
+            INSERT INTO Siparisler (masa_id, siparis_kodu, toplam_tutar, odeme_durumu, siparis_durumu, device_id, customer_session_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """
+        siparis_id = self.db.execute_non_query(
+            query,
+            (masa_id, siparis_kodu, toplam_tutar, odeme_durumu, siparis_durumu, device_id, customer_session_id),
+        )
         if not siparis_id:
             s_row = self.db.execute_query("SELECT id FROM Siparisler WHERE siparis_kodu = ?", (siparis_kodu,), fetch_one=True)
             if s_row:
@@ -182,6 +202,56 @@ class SiparisRepository:
                 line.get("urun_notu") or "",
                 line["ara_toplam"],
             )
+
+    def get_movable_detail_rows(self, masa_id: int) -> List[Dict]:
+        """Masanın taşınabilir sipariş kalemleri, satır kimliğiyle birlikte.
+
+        Kapsam bilinçli olarak `move_orders_between_masalar` ile aynı: iptal ve
+        kapatılmış siparişler hariç her şey. Böylece "tümünü taşı" ile "seçili
+        kalemleri taşı" aynı kümede çalışır ve ikisi birbirinden sapmaz.
+        """
+        query = """
+            SELECT sd.id, sd.siparis_id, sd.urun_id, sd.adet, sd.birim_fiyat,
+                   sd.urun_notu, sd.ara_toplam, u.urun_adi
+            FROM SiparisDetaylari sd
+            JOIN Siparisler s ON sd.siparis_id = s.id
+            JOIN Urunler u ON sd.urun_id = u.id
+            WHERE s.masa_id = ? AND s.siparis_durumu NOT IN (?, ?)
+            ORDER BY sd.siparis_id ASC, sd.id ASC
+        """
+        return self.db.execute_query(
+            query,
+            (masa_id, OrderStatus.CANCELLED.value, OrderStatus.PAID_CLOSED.value),
+        ) or []
+
+    def reassign_detaylar_to_siparis(self, detay_ids: List[int], hedef_siparis_id: int) -> None:
+        """Seçili kalemleri başka bir sipariş başlığının altına taşır."""
+        if not detay_ids:
+            return
+        placeholders = ", ".join("?" for _ in detay_ids)
+        query = f"UPDATE SiparisDetaylari SET siparis_id = ? WHERE id IN ({placeholders})"
+        self.db.execute_non_query(query, (hedef_siparis_id, *detay_ids))
+
+    def move_single_order_to_masa(self, siparis_id: int, to_masa_id: int) -> None:
+        self.db.execute_non_query(
+            "UPDATE Siparisler SET masa_id = ? WHERE id = ?", (to_masa_id, siparis_id)
+        )
+
+    def sync_siparis_total(self, siparis_id: int) -> None:
+        """Başlık toplamını kalemlerinden yeniden hesaplar.
+
+        Kalem taşındıktan sonra iki başlığın da toplamı değişir. Tutarı
+        istemciden almak yerine veritabanındaki satırlardan türetmek, kasadaki
+        rakamın her zaman gerçekten duran kalemlerle uyuşmasını garanti eder.
+        """
+        query = """
+            UPDATE Siparisler
+            SET toplam_tutar = ISNULL(
+                (SELECT SUM(ara_toplam) FROM SiparisDetaylari WHERE siparis_id = ?), 0
+            )
+            WHERE id = ?
+        """
+        self.db.execute_non_query(query, (siparis_id, siparis_id))
 
     def move_orders_between_masalar(self, from_masa_id: int, to_masa_id: int):
         query = """

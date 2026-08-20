@@ -315,14 +315,33 @@ class SiparisService:
                 "siparis": order_dict
             })
 
-    async def create_siparis(self, data: SiparisOlusturModel) -> SiparisResponse:
+    async def create_siparis(
+        self,
+        data: SiparisOlusturModel,
+        customer_session_id: Optional[int] = None,
+    ) -> SiparisResponse:
+        """Sipariş oluşturur.
+
+        ``customer_session_id`` istek gövdesinden DEĞİL, doğrulanmış müşteri
+        oturumundan gelir (controller `get_current_user_or_customer` sonucundan
+        aktarır). Bu yüzden "bu siparişi kim verdi" bilgisi taklit edilemez;
+        istemcinin gönderdiği ``device_id`` ise edilebilir ve bu amaçla
+        kullanılmaz.
+        """
         if data.device_id:
             banned = self.auth_repo.get_banned_device(data.device_id)
             if banned:
                 raise HTTPException(status_code=403, detail="Erişiminiz engellendi. Cihazınız yasaklı.")
 
         items_key = tuple(sorted((item.urun_id, item.adet, (item.urun_notu or "").strip()) for item in data.urunler))
-        cache_key = (data.masa_id, data.device_id or "no-device", items_key)
+        # Oturum da anahtarın parçası: aynı masadaki iki kişi aynı anda aynı
+        # ürünü söylediğinde bu iki ayrı siparişdir, tekrar gönderim değil.
+        cache_key = (
+            data.masa_id,
+            data.device_id or "no-device",
+            customer_session_id or 0,
+            items_key,
+        )
         now = time.time()
         _prune_idempotency_cache(now)
         if cache_key in _RECENT_ORDERS_CACHE:
@@ -362,6 +381,7 @@ class SiparisService:
                 odeme_durumu,
                 siparis_durumu,
                 data.device_id,
+                customer_session_id,
             )
 
             if not siparis_id:
@@ -383,6 +403,8 @@ class SiparisService:
                 "olusturma_tarihi": datetime.datetime.now().strftime("%H:%M:%S"),
                 "garson_adi": None,
                 "device_id": data.device_id,
+                # Yanıt, siparişi veren oturuma dönüyor: kendi siparişi.
+                "is_mine": customer_session_id is not None,
                 "detaylar": detaylar
             }
             full_order = SiparisResponse.model_validate(full_order_dict)
@@ -398,7 +420,11 @@ class SiparisService:
         await self._publish_stock_changed(line["urun_id"] for line in priced_items)
         return full_order
 
-    def _map_to_siparis_response(self, order_dict: dict) -> SiparisResponse:
+    def _map_to_siparis_response(
+        self,
+        order_dict: dict,
+        viewer_session_id: Optional[int] = None,
+    ) -> SiparisResponse:
         order_dict['detaylar'] = self.siparis_repo.get_siparis_detaylari(order_dict['id'])
         for d in order_dict['detaylar']:
             d['urun_notu'] = d.get('urun_notu') or ""
@@ -406,13 +432,33 @@ class SiparisService:
         if isinstance(order_dict.get('olusturma_tarihi'), datetime.datetime):
             order_dict['olusturma_tarihi'] = order_dict['olusturma_tarihi'].strftime("%H:%M:%S")
             
+        # "Benim siparişim mi" kararı burada, veritabanındaki oturum kimliği ile
+        # verilir. İstemci yalnızca token gönderir; hangi oturuma ait olduğu
+        # sunucuda çözülür, bu yüzden bir cihaz başkasının siparişini kendi
+        # siparişiymiş gibi gösteremez.
+        #
+        # `viewer_session_id` yoksa (personel yolları) alan None bırakılır:
+        # "hayır" değil, "bu soru sorulmadı".
+        if viewer_session_id is not None:
+            kayitli = order_dict.get('customer_session_id')
+            order_dict['is_mine'] = (
+                kayitli is not None and int(kayitli) == int(viewer_session_id)
+            )
+
         return SiparisResponse.model_validate(order_dict)
 
     def get_siparisler(self, durum: Optional[str] = None, masa_id: Optional[int] = None) -> List[SiparisResponse]:
         siparisler = self.siparis_repo.get_all(durum, masa_id)
         return [self._map_to_siparis_response(s) for s in siparisler]
 
-    def get_masa_aktif_siparis(self, masa_id: int):
+    def get_masa_aktif_siparis(self, masa_id: int, viewer_session_id: Optional[int] = None):
+        """Masanın açık adisyonu.
+
+        Yanıt her zaman masanın TAMAMINI içerir: ödenecek tutar masanın
+        tamamıdır ve müşteriye yalnızca kendi kalemlerini göstermek, hesap
+        geldiğinde sürprize yol açar. Kişisel görünüm istemcide bir filtredir;
+        hangi siparişin kime ait olduğu ise burada, sunucuda işaretlenir.
+        """
         target_masa_id = masa_id
         is_redirected = False
 
@@ -423,17 +469,31 @@ class SiparisService:
         siparisler = self.siparis_repo.get_all_active_by_masa_id(target_masa_id)
         alinan_tutar = self.siparis_repo.get_masa_tahsilat_toplami(target_masa_id)
         if siparisler:
-            s_dtos = [self._map_to_siparis_response(s) for s in siparisler]
+            s_dtos = [
+                self._map_to_siparis_response(s, viewer_session_id=viewer_session_id)
+                for s in siparisler
+            ]
             genel_toplam = sum(s.toplam_tutar for s in s_dtos if s.toplam_tutar)
+            benim_toplamim = sum(
+                s.toplam_tutar for s in s_dtos if s.is_mine and s.toplam_tutar
+            )
             res = {
                 "has_active": True,
                 "siparisler": [s.model_dump(mode="json") for s in s_dtos],
                 "siparis": s_dtos[-1].model_dump(mode="json"),
                 "genel_toplam": genel_toplam,
+                "benim_toplamim": benim_toplamim if viewer_session_id is not None else None,
                 "alinan_tutar": alinan_tutar
             }
         else:
-            res = {"has_active": False, "siparisler": [], "siparis": None, "genel_toplam": 0.0, "alinan_tutar": alinan_tutar}
+            res = {
+                "has_active": False,
+                "siparisler": [],
+                "siparis": None,
+                "genel_toplam": 0.0,
+                "benim_toplamim": 0.0 if viewer_session_id is not None else None,
+                "alinan_tutar": alinan_tutar,
+            }
 
         if is_redirected:
             t_table = self.masa_repo.get_by_id(target_masa_id)
@@ -692,6 +752,106 @@ class SiparisService:
             {"masa_id": to_masa_id, "durum": TableStatus.OCCUPIED.value, "is_move": True},
         )
         await event_bus.publish("durum_guncellendi", event_payload)
+
+    async def move_masa_items(
+        self, from_masa_id: int, to_masa_id: int, detay_ids: List[int]
+    ):
+        """Adisyonun seçilen kalemlerini başka bir masaya aktarır.
+
+        Kasadaki "Seçili Ürünleri Taşı" sekmesi bugüne kadar bir yanılsamaydı:
+        onay düğmesi seçimden bağımsız olarak `/api/masalar/move` çağırıyor,
+        yani her zaman masanın TAMAMINI taşıyordu. Kutucuklar hiçbir yere
+        gönderilmiyordu.
+
+        Kalem taşıma iki şekilde olur:
+
+        - Bir siparişin bütün kalemleri seçilmişse başlık olduğu gibi taşınır.
+          Fiş numarası, ödeme durumu ve geçmişi korunur.
+        - Bir siparişin yalnızca bir kısmı seçilmişse sipariş BÖLÜNÜR: hedef
+          masada aynı ödeme/sipariş durumuna sahip yeni bir başlık açılır,
+          seçilen satırlar oraya taşınır ve iki başlığın toplamı da kalemlerden
+          yeniden hesaplanır.
+
+        Stok hareket etmez; kalemler yalnızca masa değiştirir.
+        """
+        if from_masa_id == to_masa_id:
+            raise HTTPException(status_code=400, detail="Hedef masa kaynak masayla aynı olamaz.")
+
+        unique_ids = list(dict.fromkeys(int(i) for i in detay_ids))
+        if not unique_ids:
+            raise HTTPException(status_code=400, detail="Taşınacak ürün seçilmedi.")
+
+        rows = self.siparis_repo.get_movable_detail_rows(from_masa_id)
+        if not rows:
+            raise HTTPException(status_code=404, detail="Bu masada taşınabilir sipariş kalemi yok.")
+
+        by_id = {int(row["id"]): row for row in rows if row.get("id") is not None}
+
+        # Yalnızca id bilmek yetki değildir: gönderilen her satırın gerçekten
+        # kaynak masaya ait olduğu doğrulanır. Aksi halde bir kasiyer, başka bir
+        # masanın kalem id'sini göndererek o masanın hesabını bölebilirdi.
+        unknown = [i for i in unique_ids if i not in by_id]
+        if unknown:
+            raise HTTPException(
+                status_code=403,
+                detail="Seçilen kalemlerden bazıları bu masaya ait değil.",
+            )
+
+        # Tamamı seçilmişse bu zaten bir masa taşımadır: müşteri oturumlarının
+        # ve yönlendirmenin de taşınması için tek yol kullanılır.
+        if len(unique_ids) == len(by_id):
+            await self.move_masa(from_masa_id, to_masa_id)
+            return {"moved_detail_count": len(unique_ids), "full_move": True}
+
+        selected_by_order: dict = {}
+        for detay_id in unique_ids:
+            row = by_id[detay_id]
+            selected_by_order.setdefault(int(row["siparis_id"]), []).append(detay_id)
+
+        total_by_order: dict = {}
+        for row in rows:
+            total_by_order[int(row["siparis_id"])] = total_by_order.get(int(row["siparis_id"]), 0) + 1
+
+        with db_transaction():
+            for siparis_id, secilen_ids in selected_by_order.items():
+                if len(secilen_ids) == total_by_order.get(siparis_id, 0):
+                    self.siparis_repo.move_single_order_to_masa(siparis_id, to_masa_id)
+                    continue
+
+                kaynak = self.siparis_repo.get_by_id(siparis_id)
+                if not kaynak:
+                    raise HTTPException(status_code=404, detail="Taşınacak sipariş bulunamadı.")
+
+                yeni_kod = f"SIP-{uuid.uuid4().hex[:6].upper()}"
+                yeni_siparis_id = self.siparis_repo.create_siparis(
+                    to_masa_id,
+                    yeni_kod,
+                    0.0,
+                    kaynak.get("odeme_durumu", PaymentStatus.PENDING.value),
+                    kaynak.get("siparis_durumu", OrderStatus.WAITER_APPROVAL_PENDING.value),
+                    kaynak.get("device_id"),
+                )
+                if not yeni_siparis_id:
+                    raise HTTPException(
+                        status_code=500, detail="Taşıma için yeni fiş oluşturulamadı."
+                    )
+
+                self.siparis_repo.reassign_detaylar_to_siparis(secilen_ids, yeni_siparis_id)
+                self.siparis_repo.sync_siparis_total(yeni_siparis_id)
+                self.siparis_repo.sync_siparis_total(siparis_id)
+
+            self.masa_repo.update_durum(to_masa_id, TableStatus.OCCUPIED.value)
+
+        # Kısmi taşımada kaynak masada hâlâ kalem var, bu yüzden masa `dolu`
+        # kalır ve müşteri oturumları da yerinde bırakılır: taşınan hesap, orada
+        # oturmaya devam eden müşterileri kapsamaz.
+        await event_bus.publish(
+            "masa_durumu_degisti",
+            {"masa_id": to_masa_id, "durum": TableStatus.OCCUPIED.value},
+        )
+        await event_bus.publish("durum_guncellendi", {"masa_id": from_masa_id})
+        await event_bus.publish("durum_guncellendi", {"masa_id": to_masa_id})
+        return {"moved_detail_count": len(unique_ids), "full_move": False}
 
     def get_all_masa_tahsilatlari(self) -> dict:
         """Aktif tahsilat toplamlarını masa id'sine göre döner."""

@@ -1,6 +1,6 @@
 # Implementation Status
 
-Last updated: 2026-08-19 +03:00
+Last updated: 2026-08-19 (3) +03:00
 
 ## Overall status
 
@@ -218,6 +218,8 @@ Tables:
 Relationships:
 
 - `Siparisler.masa_id -> Masalar.id`
+- `Siparisler.customer_session_id -> CustomerSessions.id` (nullable, added
+  2026-08-19 by `scripts/add_customer_session_to_orders.py`)
 - `SiparisDetaylari.siparis_id -> Siparisler.id`
 - `SiparisDetaylari.urun_id -> Urunler.id`
 - `Urunler.kategori_id -> Kategoriler.id`
@@ -1003,6 +1005,51 @@ and known limits.
    forever. Harmless in the current flow because tables do get closed, but a
    timeout would need its own decision.
 
+7. **Per-device order visibility:** RESOLVED 2026-08-19 by the user, and
+   implemented. `Siparisler.customer_session_id` (nullable) now records which
+   verified `CustomerSessions` row placed the order. The controller reads it
+   from `get_current_user_or_customer`, never from the request body, so the
+   answer to "who ordered this" cannot be forged the way `device_id` could.
+
+   The read path returns `is_mine` per order plus `benim_toplamim`, both
+   computed server-side. The customer client only filters. The bill total is
+   deliberately still the whole table in both views: showing a personal total
+   as *the* total would surprise the guest when the bill arrives and would not
+   match the till.
+
+   Limits that remain, and are NOT solved by this column:
+   - a session is not a person. Two tabs, cleared storage, or a shared phone
+     all break the mapping, and there is no login to repair it.
+   - orders created before this change have `NULL` and therefore never appear
+     under "Benim Siparişlerim". No data was invented for them.
+   - this must not become a payment boundary. Per-person payment needs a real
+     check/person entity; `MasaTahsilatlari` is per table.
+
+   The original open question is kept below for the record:
+
+   **Was OPEN, user decision required.**
+   Today every phone at a table sees the whole table's orders. The data to
+   split that view already exists: `Siparisler.device_id` is written on
+   creation and returned by `/api/masalar/{id}/aktif-siparis`, and the customer
+   client already knows its own `qr_device_id`. So a "Benim Siparişlerim /
+   Masanın Tümü" toggle is a client-side filter, not a schema change.
+
+   What it does NOT give: `device_id` is a browser-profile identifier, not a
+   person. A phone that clears storage, orders from a second tab, or hands the
+   menu to a friend breaks the mapping, and there is no login to repair it. So
+   the filter can be an aid to reading the bill, never an authorisation
+   boundary or the basis of a split payment.
+
+   Recommendation on record: default the customer view to the whole table
+   (it is the truth of what will be charged) and offer the personal filter as
+   an explicitly labelled toggle. Do not hide other people's orders by default
+   and do not let the filter drive any payment amount.
+
+8. **NEW - partial item transfer granularity:** the 2026-08-19 (2) batch moves
+   whole `SiparisDetaylari` rows between tables. Splitting a row by quantity
+   ("move 1 of the 3 soups") is not supported and would need its own decision:
+   it changes line pricing and produces a second kitchen ticket.
+
 ---
 
 ## Exact next action
@@ -1028,6 +1075,28 @@ and known limits.
    that `Urunler.stok_miktari` went back up by exactly the undelivered
    quantity. Then repeat with the order marked `teslim_edildi` first - stock
    must NOT come back.
+8. ~~Cashier "move selected items" moved the whole table regardless of the
+   selection~~ - DONE 2026-08-19 (2). `POST /api/masalar/move-items`.
+9. ~~Cashier ticket columns clipped four-digit amounts; the details button
+   drifted with the product name~~ - DONE 2026-08-19 (2).
+10. ~~Receipt lumped order-time payments and till collections into one
+   "Önceden Ödenen" line~~ - DONE 2026-08-19 (2); now an itemised
+   "ÖDEME BİLGİLERİ" section.
+11. Manual round for the transfer: two receipts on one table, move a single
+   line to another table, verify both totals against their lines in SQL and
+   that `SiparisDetaylari.siparis_id` points at the new header.
+12. ~~Blocker 7 (per-device order visibility) needs the user's decision~~ -
+   DECIDED and DONE 2026-08-19 (3). `Siparisler.customer_session_id` +
+   "Benim Siparişlerim" tab.
+13. Manual round for ownership, on a test dataset: open the same table's QR in a
+   normal window and in an incognito window, order from each, and confirm that
+   each device's "Benim Siparişlerim" shows only its own order while
+   "Masanın Tümü" and the bill total show both. Then check with SQL that both
+   `Siparisler` rows carry different `customer_session_id` values.
+14. Still open, unchanged: `Siparisler` has no `odeme_yontemi` column, so the
+   payment method chosen at order time is lost on read-back. Adding it is a
+   separate decision (see the 2026-08-19 discussion: the column in
+   `MasaTahsilatlari` measures a different thing and must stay where it is).
 
 Future work, not scheduled: introduce a real `MasaOturumlari` (check) entity
 with `Siparisler.oturum_id` and `CustomerSessions.oturum_id`. The check boundary
