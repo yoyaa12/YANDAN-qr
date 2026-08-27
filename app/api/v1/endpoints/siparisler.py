@@ -34,7 +34,14 @@ async def create_siparis(
 ) -> SiparisIslemCevapModel:
     customer_session_id = None
     if isinstance(actor, dict):
-        if actor["masa_id"] != data.masa_id:
+        # Taşınmış masa: istemci eski masa kimliğiyle sipariş göndermeye devam
+        # edebilir, oturum ise hedef masaya bağlıdır. Servis katmanı siparişi
+        # zaten hedef masaya yazar (`TABLE_MOVES_MAP`), bu yüzden burada
+        # reddetmek siparişi sebepsiz düşürürdü.
+        if actor["masa_id"] not in (
+            data.masa_id,
+            service.resolve_masa_redirect(data.masa_id),
+        ):
             raise HTTPException(
                 status_code=403,
                 detail="Bu oturum ile sadece yetkili olduğunuz masaya sipariş verebilirsiniz."

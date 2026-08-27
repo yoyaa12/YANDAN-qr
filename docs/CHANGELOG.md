@@ -3822,3 +3822,317 @@ buldu (dinamik QR modalındaki masa adı).
 #### Next action
 
 - None (bu iş kapsamında).
+
+---
+
+### 2026-08-27 - Masa taşımada oturum sürekliliği, kasa tahsilatının siparişlere işlenmesi, QR yerel uyarısının kaldırılması
+
+#### Summary
+
+Demo öncesi bildirilen üç konu kapatıldı. İkisi aynı kökten geliyordu:
+adisyonun parçaları (siparişler / müşteri oturumları / tahsilat) birbirinden
+kopuk taşınıyor ve kapanıyordu.
+
+1. `move_masa` yalnızca `Siparisler.masa_id` güncelliyordu; canlı müşteri
+   oturumları kaynak masada kalıyordu. Görünür iki sonucu vardı: müşteri hedef
+   masada kendi siparişlerini kaybediyordu (istemci yeni oturum açmak zorunda
+   kalıyor, taşınan siparişler eski oturum kimliğini taşımaya devam ediyordu),
+   ve adisyon hedef masada kapatılınca `revoke_all_sessions_for_masa` kaynak
+   masada unutulan satırları görmüyor, o satırlar TTL dolana kadar
+   `is_active = 1` kalıyordu. Canlı veritabanında bu durumdaki iki satır
+   (id 195, 196; `masa_id = 5`, siparişleri `masa_id = 6`) doğrulandı.
+2. `add_tahsilat` yalnızca `MasaTahsilatlari` tablosuna satır yazıyordu. Kasada
+   alınan para siparişlerin `odeme_durumu` alanına hiç yansımıyordu: hesap
+   toplamı ile ödenen tutar birbirini tutarken adisyon satırları "Açık"
+   görünmeye devam ediyor, teslim anında `get_unpaid_count_for_masa`
+   sıfırlanmadığı için masa kendiliğinden kapanmıyordu.
+3. Kasadaki dinamik QR modalı, panel localhost'tan açıldığında bir uyarı kutusu
+   basıyordu. Kutu kaldırıldı; QR hedefi her durumda panelin kendi origin'i.
+
+#### Files created
+
+- `tests/test_table_move_and_till_settlement.py`
+- `tests/frontend/table_move_session_continuity.test.cjs`
+
+#### Files modified
+
+- `app/repositories/auth_repo.py` - `move_active_sessions_to_masa` eklendi.
+- `app/repositories/siparis_repo.py` - `get_open_orders_total_for_masa` ve
+  `mark_open_orders_paid_for_masa` eklendi.
+- `app/services/siparis_service.py` - `move_masa` oturumları da taşıyor;
+  `_settle_masa_if_covered` eklendi ve `add_tahsilat` içinden çağrılıyor;
+  `_PAYMENT_EPSILON` sabiti eklendi.
+- `static/js/app.js` - `migrateSessionTokenToMasa` eklendi, `handleTableMove`
+  içinden çağrılıyor.
+- `static/js/kasa.js` - QR uyarı kutusu ve `isLocalOnly` dalı kaldırıldı
+  (`buildMasaQrTarget` -> `buildMasaQrUrl`); tamamı ödenmiş ama kapanmamış
+  adisyon artık adisyon ekranından silinmiyor; fişteki ödeme kırılımı yalnızca
+  iki kalem de varken yazılıyor.
+- `tests/frontend/kasa_qr_local.test.cjs` - kaldırılan uyarıya bağlı iki test
+  yeni davranışa göre yazıldı.
+
+#### Files deleted
+
+- None
+
+#### Database / migrations
+
+- Şema değişikliği YOK. DDL çalıştırılmadı. Yalnızca mevcut kolonlar üzerinde
+  UPDATE: `CustomerSessions.masa_id`, `Siparisler.odeme_durumu`,
+  `MasaTahsilatlari.is_closed`.
+
+#### API changes
+
+- `POST /api/masalar/{masa_id}/tahsilat` yanıtındaki `message` metni, açık
+  siparişler ödendi işaretlendiğinde farklılaşıyor. Şema
+  (`GenelBasariliResponse`) değişmedi, breaking değil.
+
+#### Authentication / authorization changes
+
+- Masa taşımada canlı müşteri oturumları hedef masaya taşınıyor. Yetki modeli
+  değişmedi: oturum yine tek bir masaya bağlı ve `masa_id` eşleşme kontrolü
+  yerinde. Değişen şey, oturumun bağlı olduğu masanın adisyonla birlikte
+  güncellenmesi.
+
+#### Tests added or modified
+
+- `tests/test_table_move_and_till_settlement.py` - 16 test. Taşımada oturum
+  sürekliliği (4) ve kasa tahsilatının siparişlere işlenmesi (12). Tahsilat
+  testleri `MagicMock` yerine durumu gerçekten güncelleyen bir sahte repository
+  kullanıyor; asıl soru "aynı para iki kez sayılıyor mu" ve buna ancak böyle
+  cevap verilebiliyor.
+- `tests/frontend/table_move_session_continuity.test.cjs` - 9 test. Token
+  taşıma (7) ve kasa ekranı/fiş davranışı (2).
+- `tests/frontend/kasa_qr_local.test.cjs` - `isLocalOnly` testleri, "her origin
+  olduğu gibi taşınır" ve "uyarı kutusu kodda kalmadı" testleriyle
+  değiştirildi.
+
+#### Tests executed
+
+- `python -m unittest discover -s tests -p "test_*.py"`
+- `node --test "tests/frontend/*.test.cjs"`
+
+#### Test results
+
+- Python: **343 test, OK** (önce 327; 16 eklendi).
+- Frontend: **156 test, 156 pass** (önce 147; 9 eklendi).
+
+#### Verification performed
+
+- Yeni SQL sorgularının tümü CANLI veritabanında, açık bir transaction içinde
+  çalıştırılıp ROLLBACK edildi: `get_open_orders_total_for_masa` (masa 5/6/44),
+  `move_active_sessions_to_masa(5, 6)`, `mark_open_orders_paid_for_masa(6)`,
+  `close_tahsilatlar_for_masa(6)`. Taşıma sorgusu tam olarak beklenen 2 satırı
+  (id 195, 196) `masa_id = 5` -> `6` yaptı; rollback sonrası tablo aynı kaldı.
+- Çift sayma tuzağı testle sabitlendi: tam ödeme -> masaya yeni sipariş -> yeni
+  siparişin açık tutarı korunuyor (eski parayla ödenmiş sayılmıyor), kısmi
+  ödeme onu kapatmıyor, kendi ödemesi geldiğinde kapanıyor.
+- Kasa paneli tarayıcıda gözle doğrulanmadı (panel giriş kimliği bu oturumda
+  yok). QR uyarı kutusunun kaynakta kalmadığı testle doğrulandı.
+
+#### Security impact
+
+- Kapanmış bir adisyondan geriye canlı oturum kalması sona erdi. Eski durumda,
+  taşınan masanın oturumları TTL boyunca (90 dk) canlı kalıyordu; o masaya yeni
+  bir müşteri oturduğunda (`durum = 'dolu'`) eski cihaz TOTP okutmadan yeni
+  grubun adisyonuna sipariş geçebiliyordu.
+- `session_token_hash` üzerinden oturum ele geçirme mümkün değil, bu incelemede
+  de teyit edildi: tabloda yalnızca SHA-256 saklanıyor, doğrulama ham token'ı
+  hash'leyip arıyor.
+- Kasa tahsilatı hâlâ sipariş durumuna bakmıyor: teslim edilmemiş bir sipariş
+  için tahsilat alınabiliyor. Bu bilinçli olarak kapsam dışı bırakıldı (aşağıya
+  bakınız).
+
+#### Architectural decisions
+
+- Karşılanan tahsilat satırları `is_closed = 1` yapılıyor. Bu şart, süs değil:
+  `MasaTahsilatlari` siparişe bağlanamadığı için (`siparis_id` yok) kapatılmayan
+  satır aynı parayı hem "kasada tahsil edilen" hem "ödenmiş sipariş" olarak iki
+  kez saydırır ve masaya sonradan eklenen sipariş, hiç ödeme alınmadan ödenmiş
+  görünürdü. `is_closed` anlamı "adisyon kapandı" ifadesinden "bu tahsilat
+  siparişlere yazıldı" ifadesine genelleştirildi.
+- Fişteki "Sipariş anında ödenen / Kasada tahsil edilen" kırılımı yalnızca iki
+  kalem de sıfırdan büyükken basılıyor. Tahsilat siparişlere işlendikten sonra
+  o para "sipariş anında ödenen" havuzunda görünüyor; tek başına o etiketle
+  basmak müşteriye yanlış bilgi vermek olurdu.
+- Kasa adisyon ekranındaki `openMasaOrders.length === 0` çıkış şartı kaldırıldı.
+  Ödenmiş olmak adisyonun kapandığı anlamına gelmez; masa hâlâ `dolu` ve fiş
+  bekliyor olabilir. Bu şart aynı zamanda "hızlı ödeme (POS) ile ödenmiş
+  siparişlerde fiş boş çıkıyor" şikayetinin de sebebiydi.
+- Kısmi kalem taşımada (`move_masa_items`, tamamı seçilmediğinde) oturumlar
+  bilinçli olarak yerinde bırakılıyor: kaynak masada oturmaya devam eden
+  müşteriler var.
+
+#### Known issues / unfinished work
+
+- Fazla ödeme (üstü / bahşiş) modellenmiş bir kavram değil. Tahsilat açık
+  toplamı aşarsa fark ayrıca saklanmaz; satır `MasaTahsilatlari` içinde
+  raporlama için durur, sonraki siparişe kredi olarak taşınmaz.
+- Kasa tahsilatı sipariş durumuna bakmıyor: teslim edilmemiş sipariş için
+  tahsilat alınabiliyor. Engel `add_tahsilat` içine tek bir kontrolle konur ve
+  şema değişikliği gerektirmez, ancak bölüm 40 uyarınca bir business-rule
+  kararıdır (bazı işletmeler bilerek peşin alır) ve kullanıcı onayı bekliyor.
+- Geçmiş adisyon / fiş arşivi ekranı yok. Kayıtlar siliniyor değil
+  (`Siparisler.siparis_durumu = 'odendi_kapatildi'`), fakat adisyonları
+  birbirinden ayıracak bir kimlik olmadığı için "eski fişi yeniden bastır"
+  yalnızca zaman damgasına dayanabilir. Kalıcı çözüm `MasaOturumlari` /
+  `adisyon_id` (bkz. IMPLEMENTATION_STATUS "Future work").
+- `MasaTahsilatlari.siparis_id` yok. Bu iş, o bağın yokluğunu tahsilat satırını
+  kapatarak telafi ediyor; temiz çözüm hâlâ kolonun eklenmesi ve şema
+  değişikliği onayına bağlı.
+
+#### Next action
+
+- Kullanıcı kararı: (a) teslim edilmemiş sipariş için kasa tahsilatı
+  engellensin mi, (b) `MasaTahsilatlari.siparis_id` eklensin mi, (c) canlı
+  kalan iki eski oturum (id 195, 196) elle iptal edilsin mi.
+
+---
+
+### 2026-08-27 (2) - Kalem taşımasında müşteri oturumunun takibi ve taşınmış masa yönlendirmesi
+
+#### Summary
+
+Aynı gün yapılan taşıma düzeltmesinin kapsamadığı iki durum kapandı.
+
+1. **Kalem taşıma (kısmi).** Kasadaki "Seçili Ürünleri Taşı" ile bir müşterinin
+   siparişi başka masaya alındığında oturumlar kural olarak yerinde bırakılıyor
+   ve bu doğru: kaynak masada oturmaya devam eden müşteriler var. Ancak bir
+   müşterinin BÜTÜN siparişleri hedef masaya gittiyse o müşteri de masayı terk
+   etmiştir. Oturumu geride kalınca istemcisi eski masayı sormaya devam ediyor:
+   adisyon toplamı olarak orada kalanların hesabını görüyor, kendi siparişlerini
+   ise hiçbir yerde göremiyordu. Canlı veritabanında bu durumdaki kayıt
+   doğrulandı: oturum 206 `masa_id = 5`, siparişi 301 ise `masa_id = 6`.
+2. **Taşınmış masanın eski kimliği.** Aynı gün eklenen "oturumu masayla birlikte
+   taşı" düzeltmesinin yan etkisi: masa taşındıktan sonra oturum hedef masaya
+   bağlanıyor, istemci ise bir süre daha eski masayı soruyor ve artık 403
+   alıyordu. `checkActiveOrder` 403'te `redirect_masa_id` alanını hiç okumadan
+   döndüğü için 3 saniyelik yoklamanın kurtarma yolu kapanmıştı; socket olayı
+   gecikirse veya kaçarsa müşterinin ekranı kalıcı olarak boş kalıyordu. Bu bir
+   regresyondur ve bu girdide düzeltilmiştir.
+
+#### Files created
+
+- None
+
+#### Files modified
+
+- `app/repositories/siparis_repo.py` - `get_customer_session_ids_with_live_orders`
+  eklendi.
+- `app/repositories/auth_repo.py` - `move_sessions_to_masa` eklendi (seçili
+  oturumlar; `move_active_sessions_to_masa` masanın tamamı için).
+- `app/services/siparis_service.py` - `move_masa_items` kısmi yolda masayı
+  terk eden oturumları taşıyor ve `musteri_oturumlari_tasindi` yayınlıyor;
+  `resolve_masa_redirect` eklendi.
+- `app/api/v1/endpoints/masalar.py`, `app/api/v1/endpoints/siparisler.py` -
+  müşteri sahiplik kontrolü, sorulan masanın taşıma hedefini de kabul ediyor.
+- `app/core/socket_manager.py` - müşteri soketine `session_id` yazılıyor;
+  `musteri_oturumlari_tasindi` aboneliği eklendi.
+- `tests/test_customer_session_authorization.py` - sahte servise
+  `resolve_masa_redirect` ve yönlendirme sözlüğü eklendi; sahte `create_siparis`
+  artık 418 döndürerek "controller yetki kapısını geçti mi" sorusunu ölçülebilir
+  kılıyor.
+- `tests/test_partial_table_transfer.py`, `tests/test_socket_auth.py` - yeni
+  test sınıfları.
+
+#### Files deleted
+
+- None
+
+#### Database / migrations
+
+- Şema değişikliği YOK. `CustomerSessions.masa_id` üzerinde koşullu `UPDATE`.
+
+#### API changes
+
+- Şema değişikliği yok. Davranış: `GET /api/masalar/{id}/aktif-siparis` ve
+  `POST /api/siparisler`, oturum sorulan masanın TAŞIMA HEDEFİNE bağlıysa artık
+  403 yerine normal yanıt veriyor. Yönlendirme dışındaki her masa hâlâ 403.
+
+#### Authentication / authorization changes
+
+- Müşteri sahiplik kontrolü `actor["masa_id"] == masa_id` yerine
+  `actor["masa_id"] in (masa_id, resolve_masa_redirect(masa_id))`. Gevşetme
+  yalnızca yönlendirme yönündedir ve yönlendirme sunucu tarafında tutulur
+  (`TABLE_MOVES_MAP`), istemciden gelmez. IDOR testleri (masa 5 oturumu masa 6'yı
+  okuyamaz / masa 6'ya sipariş veremez) değişmeden geçiyor.
+- Socket oturumuna `session_id` yazılıyor. Kısmi taşıma yayınının hedefi bununla
+  seçiliyor; cihaz kimliği taklit edilebildiği için bilinçli olarak
+  kullanılmadı.
+
+#### Tests added or modified
+
+- `tests/test_partial_table_transfer.py` - 10 test: masayı terk eden oturum
+  taşınıyor, kaynakta siparişi kalan oturum taşınmıyor, `UPDATE` kaynak masa ile
+  sınırlı, taşınanlara olay gidiyor, kimse taşınmadıysa olay yok, `masa_tasindi`
+  kaynak masanın odasına ASLA gitmiyor, personel siparişinde taşınacak oturum
+  yok; `resolve_masa_redirect` için 3 test.
+- `tests/test_socket_auth.py` - 8 test: yalnızca taşınan müşteriye emit,
+  yalnızca o oda değiştiriyor, kalan müşteri yerinde, presence takibi doğru,
+  odadaki personel soketi hiç taşınmıyor, boş liste ve bozuk payload sessizce
+  yok sayılıyor.
+- `tests/test_customer_session_authorization.py` - 4 test: taşınmış masanın eski
+  kimliği hem okuma hem sipariş yolunda kabul ediliyor; üçüncü bir masaya
+  yönlendirme kapıyı açmıyor; ilgisiz masa hâlâ reddediliyor.
+
+#### Tests executed
+
+- `python -m unittest discover -s tests -p "test_*.py"`
+- `node --test "tests/frontend/*.test.cjs"`
+
+#### Test results
+
+- Python: **365 test, OK** (önce 343; 22 eklendi).
+- Frontend: **156 test, 156 pass** (değişmedi).
+
+#### Verification performed
+
+- Kullanıcının bildirdiği senaryonun kendisi canlı veritabanında, açık bir
+  transaction içinde çalıştırılıp ROLLBACK edildi. Gerçek veri: oturum 205 ve
+  206 `masa_id = 5`; sipariş 300 (oturum 205) masa 5'te, sipariş 301
+  (oturum 206) masa 6'da. Yeni mantığın sonucu:
+  masa 5'te canlı siparişi olanlar `[205]`, masa 6'da `[206]`, taşınacak
+  `[206]`, `UPDATE` 1 satır etkiledi, oturum 206 -> masa 6 oldu, oturum 205
+  masa 5'te kaldı. Rollback sonrası tablo aynı.
+- İstemcide ayrı bir olay adı gerekmedi: taşınan müşteri normal bir
+  `masa_tasindi` alıyor, `app.js` mevcut işleyicisi token anahtarını taşıyıp
+  masayı güncelliyor.
+
+#### Security impact
+
+- Sahiplik kontrolündeki gevşetme yalnızca sunucunun kendi tuttuğu taşıma
+  yönlendirmesi kadardır; istemci bir masa kimliği uydurarak başka bir masanın
+  adisyonuna erişemez. İki IDOR regresyon testi değişmeden duruyor.
+- Kısmi taşıma yayını oturum kimliğine göre hedefleniyor. Cihaz kimliği
+  kullanılsaydı, bir istemci başkasının cihaz kimliğini iddia ederek yönlendirme
+  olayını çekebilirdi; bu yalnızca kendi ekranını bozardı ama gereksiz bir
+  yüzeydi.
+
+#### Architectural decisions
+
+- "Masayı terk etti" tanımı: hedef masada canlı siparişi VAR ve kaynak masada
+  canlı siparişi YOK. İki masada birden siparişi kalan müşteri kaynakta
+  bırakılır; hesabı bölünmüştür ve fiziksel olarak hangi masada olduğu
+  belirsizdir, muhafazakâr taraf kaynaktır.
+- İstemciye giden olay adı yine `masa_tasindi`. Taşınan müşteri için olan tam
+  olarak budur; ayrı bir olay adı istemcide ikinci bir kod yolu açardı.
+- `resolve_masa_redirect` servis katmanında. `TABLE_MOVES_MAP` süreç
+  belleğindedir ve controller'ın onu doğrudan içe aktarması katman sınırını
+  ihlal ederdi.
+
+#### Known issues / unfinished work
+
+- `TABLE_MOVES_MAP` hâlâ süreç belleğinde: uygulama yeniden başlarsa taşınmış
+  masanın eski kimliğiyle gelen istemci 403 alır ve QR'ı yeniden okutmak
+  zorunda kalır. Kalıcı çözüm, adisyonu birinci sınıf bir varlık yapmaktan
+  geçiyor (bkz. IMPLEMENTATION_STATUS "Future work").
+- Kısmi taşımada socket olayı kaçarsa (bağlantı kopukken taşıma yapılırsa)
+  istemci eski masada kalır ve 403 alır; orada gerçekten başkalarının adisyonu
+  olduğu için yönlendirme gevşetmesi bu durumu kapsayamaz. Kurtarma yolu
+  sayfayı yenilemek veya QR'ı yeniden okutmaktır.
+
+#### Next action
+
+- Önceki girdideki kullanıcı kararları hâlâ açık: teslim edilmemiş sipariş için
+  kasa tahsilatının engellenmesi, `MasaTahsilatlari.siparis_id`, geçmiş adisyon
+  ekranı.

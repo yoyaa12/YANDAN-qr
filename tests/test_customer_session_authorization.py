@@ -15,6 +15,8 @@ import hashlib
 import json
 import unittest
 
+from fastapi import HTTPException
+
 from app.repositories.auth_repo import AuthRepository
 from app.services.siparis_service import SiparisService
 
@@ -99,6 +101,13 @@ class RecordingOrderService:
         # Siparislerim" gorunumunun dogru kisiye ait olmasi buna bagli.
         self.viewer_session_ids = []
 
+        # Tasinmis masa yonlendirmeleri. Varsayilan bos: hicbir masa
+        # tasinmamis. Testler tek tek doldurur.
+        self.redirects = {}
+
+    def resolve_masa_redirect(self, masa_id):
+        return self.redirects.get(masa_id, masa_id)
+
     def get_masa_aktif_siparis(self, masa_id, viewer_session_id=None):
         self.calls.append(("get_masa_aktif_siparis", masa_id))
         self.viewer_session_ids.append(viewer_session_id)
@@ -111,9 +120,14 @@ class RecordingOrderService:
             "alinan_tutar": 0.0,
         }
 
-    async def create_siparis(self, data, customer_session_id=None):  # pragma: no cover
+    async def create_siparis(self, data, customer_session_id=None):
+        # Reddedilen isteklerde buraya hic gelinmemeli; `calls` bos kalmali.
+        # Izin verilen istekte ise ayirt edilebilir bir durum kodu doner:
+        # boylece testin olctugu sey yalnizca "controller yetki kapisini gecti
+        # mi" olur, servisin urettigi yanit degil.
         self.calls.append(("create_siparis", data.masa_id))
-        raise AssertionError("create_siparis must not run for a rejected request")
+        self.viewer_session_ids.append(customer_session_id)
+        raise HTTPException(status_code=418, detail="controller izin verdi")
 
 
 ORDER_PAYLOAD = {
@@ -224,6 +238,80 @@ class CustomerSessionRouteAuthorizationTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(status, 403)
         self.assertIn("yetkili olduğunuz masaya", body.get("detail", ""))
+        self.assertEqual(self.order_service.calls, [])
+
+
+class MovedTableRedirectTests(unittest.IsolatedAsyncioTestCase):
+    """Taşınmış masanın eski kimliğiyle gelen istek reddedilmemeli.
+
+    Masa taşındığında müşteri oturumu hedef masaya bağlanır, istemci ise bir
+    süre daha eski masayı sorar: socket olayı gecikirse veya kaçarsa 3
+    saniyelik yoklama tek kurtarma yoludur. Yetki reddi o yolu da kapatıyor,
+    müşterinin ekranı kalıcı olarak boş kalıyordu.
+
+    Gevşetme yalnızca YÖNLENDİRME yönündedir; ilgisiz bir masa hâlâ 403'tür.
+    """
+
+    def setUp(self):
+        from app.main import app
+
+        self.app = app
+        self.order_service = RecordingOrderService()
+        app.dependency_overrides[AuthRepository] = lambda: FakeAuthRepository()
+        app.dependency_overrides[SiparisService] = lambda: self.order_service
+
+    def tearDown(self):
+        self.app.dependency_overrides.clear()
+
+    async def test_the_old_id_of_a_moved_table_is_served(self):
+        # Masa 6'nın adisyonu masa 5'e taşındı; oturum masa 5'te.
+        self.order_service.redirects[OTHER_TABLE_ID] = SESSION_TABLE_ID
+
+        status, _ = await asgi_request(
+            self.app, "GET", f"/api/masalar/{OTHER_TABLE_ID}/aktif-siparis",
+            token=CUSTOMER_TOKEN_TABLE_5,
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            self.order_service.calls, [("get_masa_aktif_siparis", OTHER_TABLE_ID)]
+        )
+
+    async def test_a_redirect_to_a_third_table_does_not_open_the_door(self):
+        # Masa 6, masa 9'a taşınmış. Masa 5'in oturumu hâlâ ilgisiz.
+        self.order_service.redirects[OTHER_TABLE_ID] = 9
+
+        status, _ = await asgi_request(
+            self.app, "GET", f"/api/masalar/{OTHER_TABLE_ID}/aktif-siparis",
+            token=CUSTOMER_TOKEN_TABLE_5,
+        )
+
+        self.assertEqual(status, 403)
+        self.assertEqual(self.order_service.calls, [])
+
+    async def test_an_order_for_the_old_id_of_a_moved_table_is_accepted(self):
+        self.order_service.redirects[OTHER_TABLE_ID] = SESSION_TABLE_ID
+
+        status, _ = await asgi_request(
+            self.app, "POST", "/api/siparisler",
+            token=CUSTOMER_TOKEN_TABLE_5, payload=ORDER_PAYLOAD,
+        )
+
+        self.assertEqual(status, 418, "controller yetki kapısını geçirmeliydi")
+        self.assertEqual(self.order_service.calls, [("create_siparis", OTHER_TABLE_ID)])
+        self.assertEqual(
+            self.order_service.viewer_session_ids,
+            [1],
+            "siparişin sahibi yine doğrulanmış oturumdan alınmalı",
+        )
+
+    async def test_an_order_for_an_unrelated_table_is_still_refused(self):
+        status, _ = await asgi_request(
+            self.app, "POST", "/api/siparisler",
+            token=CUSTOMER_TOKEN_TABLE_5, payload=ORDER_PAYLOAD,
+        )
+
+        self.assertEqual(status, 403)
         self.assertEqual(self.order_service.calls, [])
 
 

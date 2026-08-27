@@ -240,5 +240,171 @@ class MoveMasaItemsTests(unittest.TestCase):
         self.assertEqual(events.count("durum_guncellendi"), 2)
 
 
+
+class SessionsFollowTheirOwnItemsTests(unittest.TestCase):
+    """Kalem taşımasında masayı terk eden müşterinin oturumu da taşınmalıdır.
+
+    Kısmi taşımada oturumlar kural olarak yerinde bırakılır: kaynak masada
+    oturmaya devam eden müşteriler vardır ve taşınan hesap onları kapsamaz.
+    Ama bir müşterinin BÜTÜN siparişleri hedef masaya gittiyse o müşteri de
+    masayı terk etmiştir. Oturumu geride kalınca istemcisi eski masayı sormaya
+    devam ediyor: adisyon toplamı olarak orada kalanların hesabını görüyor,
+    kendi siparişlerini ise hiçbir yerde göremiyordu.
+    """
+
+    def setUp(self):
+        siparis_service_module.TABLE_MOVES_MAP.clear()
+        self.addCleanup(siparis_service_module.TABLE_MOVES_MAP.clear)
+
+        self.mock_siparis_repo = MagicMock()
+        self.mock_masa_repo = MagicMock()
+        self.mock_auth_repo = MagicMock()
+        self.service = SiparisService(
+            siparis_repo=self.mock_siparis_repo,
+            masa_repo=self.mock_masa_repo,
+            urun_repo=MagicMock(),
+            auth_repo=self.mock_auth_repo,
+        )
+
+        # Masa 4: fiş #10 (oturum 205) ve fiş #11 (oturum 206).
+        self.rows = [
+            _row(101, 10, 3, 2, 85.0),
+            _row(102, 10, 9, 1, 40.0),
+            _row(103, 11, 7, 3, 60.0),
+        ]
+        self.mock_siparis_repo.get_movable_detail_rows.return_value = self.rows
+        self.mock_siparis_repo.get_by_id.return_value = {
+            "id": 10,
+            "masa_id": 4,
+            "masa_no": "Masa 4",
+            "odeme_durumu": PaymentStatus.PENDING.value,
+            "siparis_durumu": OrderStatus.WAITER_APPROVED_IN_KITCHEN.value,
+            "device_id": "device-a",
+        }
+        self.mock_siparis_repo.create_siparis.return_value = 77
+        self.mock_masa_repo.get_by_id.side_effect = lambda mid: {
+            "id": mid,
+            "masa_no": f"S-{mid}",
+        }
+
+        patcher_tx = patch("app.services.siparis_service.db_transaction", _no_transaction)
+        patcher_bus = patch("app.services.siparis_service.event_bus")
+        patcher_browsing = patch("app.services.siparis_service.clear_browsing_table")
+        for patcher in (patcher_tx, patcher_bus, patcher_browsing):
+            self.addCleanup(patcher.stop)
+        patcher_tx.start()
+        self.mock_bus = patcher_bus.start()
+        self.mock_bus.publish = AsyncMock()
+        patcher_browsing.start()
+
+    def _set_live_sessions(self, kaynak, hedef):
+        """Taşımadan SONRAKI durumu kurar: hangi masada kimin siparişi kaldı."""
+        def by_masa(masa_id):
+            return kaynak if masa_id == 4 else hedef
+        self.mock_siparis_repo.get_customer_session_ids_with_live_orders.side_effect = by_masa
+
+    def _move(self, detay_ids, from_masa_id=4, to_masa_id=6):
+        return asyncio.run(self.service.move_masa_items(from_masa_id, to_masa_id, detay_ids))
+
+    def _published(self, event_name):
+        return [
+            call.args[1]
+            for call in self.mock_bus.publish.await_args_list
+            if call.args and call.args[0] == event_name
+        ]
+
+    def test_a_guest_whose_every_item_moved_takes_their_session_along(self):
+        """Asıl regresyon: fiş #11 taşındı, oturum 206 masa 4'te kaldı."""
+        self._set_live_sessions(kaynak=[205], hedef=[206])
+
+        self._move([103])
+
+        self.mock_auth_repo.move_sessions_to_masa.assert_called_once_with([206], 4, 6)
+
+    def test_a_guest_still_eating_at_the_source_table_keeps_their_session(self):
+        """Oturum 205'in masa 4'te hâlâ siparişi var: yerinden oynatılamaz."""
+        self._set_live_sessions(kaynak=[205, 206], hedef=[206])
+
+        self._move([103])
+
+        self.mock_auth_repo.move_sessions_to_masa.assert_not_called()
+
+    def test_a_guest_already_at_the_target_table_is_not_touched(self):
+        """Hedef masada zaten oturan müşterinin oturumu taşınacaklar arasında
+        olsa bile sorgu `masa_id = kaynak` ile sınırlıdır."""
+        self._set_live_sessions(kaynak=[205], hedef=[206, 300])
+
+        self._move([103])
+
+        args = self.mock_auth_repo.move_sessions_to_masa.call_args.args
+        self.assertEqual(args[1], 4, "kaynak masa kısıtı gönderilmeli")
+        self.assertEqual(args[2], 6)
+
+    def test_the_moved_guests_are_told_where_they_went(self):
+        self._set_live_sessions(kaynak=[205], hedef=[206])
+
+        self._move([103])
+
+        events = self._published("musteri_oturumlari_tasindi")
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["session_ids"], [206])
+        self.assertEqual(events[0]["from_masa_id"], 4)
+        self.assertEqual(events[0]["to_masa_id"], 6)
+        self.assertEqual(events[0]["to_masa_no"], "S-6")
+
+    def test_nobody_is_told_anything_when_no_session_moved(self):
+        self._set_live_sessions(kaynak=[205, 206], hedef=[206])
+
+        self._move([103])
+
+        self.assertEqual(self._published("musteri_oturumlari_tasindi"), [])
+
+    def test_the_source_table_is_never_broadcast_a_table_move(self):
+        """`masa_tasindi` kaynak masanın odasına gitmemeli.
+
+        Kısmi taşımada orada oturmaya devam eden müşteriler var; masa taşıma
+        yayını onlara da düşerdi ve hepsi taşındığını sanırdı.
+        """
+        self._set_live_sessions(kaynak=[205], hedef=[206])
+
+        self._move([103])
+
+        self.assertEqual(self._published("masa_tasindi"), [])
+
+    def test_staff_created_orders_have_no_session_to_move(self):
+        """`customer_session_id` NULL olan kayıtlar listeye hiç girmez."""
+        self._set_live_sessions(kaynak=[], hedef=[])
+
+        self._move([103])
+
+        self.mock_auth_repo.move_sessions_to_masa.assert_not_called()
+        self.assertEqual(self._published("musteri_oturumlari_tasindi"), [])
+
+
+class MovedTableRedirectResolutionTests(unittest.TestCase):
+    """Taşınan masanın adisyonunun şu an nerede durduğu."""
+
+    def setUp(self):
+        siparis_service_module.TABLE_MOVES_MAP.clear()
+        self.addCleanup(siparis_service_module.TABLE_MOVES_MAP.clear)
+        self.service = SiparisService(
+            siparis_repo=MagicMock(),
+            masa_repo=MagicMock(),
+            urun_repo=MagicMock(),
+            auth_repo=MagicMock(),
+        )
+
+    def test_an_untouched_table_resolves_to_itself(self):
+        self.assertEqual(self.service.resolve_masa_redirect(4), 4)
+
+    def test_a_moved_table_resolves_to_its_target(self):
+        siparis_service_module.TABLE_MOVES_MAP[4] = 6
+        self.assertEqual(self.service.resolve_masa_redirect(4), 6)
+
+    def test_the_target_table_still_resolves_to_itself(self):
+        siparis_service_module.TABLE_MOVES_MAP[4] = 6
+        self.assertEqual(self.service.resolve_masa_redirect(6), 6)
+
+
 if __name__ == "__main__":
     unittest.main()

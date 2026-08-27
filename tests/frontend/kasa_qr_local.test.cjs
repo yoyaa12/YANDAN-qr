@@ -12,6 +12,10 @@
  *    `http://192.168.1.100:8000` idi. Makinenin IP'si DHCP ile değiştiği için
  *    QR sessizce ölü bir adres taşıyordu: telefonla okutulunca hiçbir şey
  *    açılmıyor, sebebi de hiçbir yerde görünmüyordu.
+ *
+ * Hedef adres artık istisnasız panelin kendi origin'idir. Localhost'u ayrıca
+ * işaretleyip modalde uyarı kutusu gösteren dal kaldırıldı: kasiyer için
+ * gürültüydü ve QR'in taşıdığı adresi değiştirmiyordu.
  */
 
 const assert = require('node:assert/strict');
@@ -49,7 +53,7 @@ function qrSandbox(origin) {
     vm.createContext(sandbox);
     vm.runInContext(
         [
-            extractBlock('function buildMasaQrTarget('),
+            extractBlock('function buildMasaQrUrl('),
             extractBlock('function renderLocalQrCode(')
         ].join('\n\n'),
         sandbox
@@ -113,10 +117,11 @@ test('the encoded output actually depends on the data', () => {
 
 test('the QR target follows the panel origin instead of a hardcoded address', () => {
     const sandbox = qrSandbox('http://10.198.1.138:8000');
-    const target = sandbox.buildMasaQrTarget('/m/44?token=907231');
 
-    assert.equal(target.url, 'http://10.198.1.138:8000/m/44?token=907231');
-    assert.equal(target.isLocalOnly, false);
+    assert.equal(
+        sandbox.buildMasaQrUrl('/m/44?token=907231'),
+        'http://10.198.1.138:8000/m/44?token=907231'
+    );
 });
 
 test('no hardcoded LAN address survives anywhere in the panel code', () => {
@@ -131,24 +136,31 @@ test('no hardcoded LAN address survives anywhere in the panel code', () => {
     );
 });
 
-test('a localhost origin is flagged so the operator is not left guessing', () => {
-    ['http://localhost:8000', 'http://127.0.0.1:8000', 'http://[::1]:8000'].forEach(origin => {
+test('every origin is carried verbatim, localhost included', () => {
+    // Origin'e gore dallanma yok: hangi adresten acildiysa QR onu tasir.
+    [
+        'http://localhost:8000',
+        'http://127.0.0.1:8000',
+        'http://[::1]:8000',
+        'https://restoran.example.com'
+    ].forEach(origin => {
         assert.equal(
-            qrSandbox(origin).buildMasaQrTarget('/m/5?token=1').isLocalOnly,
-            true,
-            `${origin} yalnızca yerel olarak işaretlenmeli`
+            qrSandbox(origin).buildMasaQrUrl('/m/5?token=1'),
+            origin + '/m/5?token=1',
+            `${origin} oldugu gibi tasinmali`
         );
     });
 });
 
-test('a lookalike hostname is not mistaken for localhost', () => {
-    ['http://localhost-evil.com', 'http://127.0.0.1.evil.com', 'https://restoran.example.com'].forEach(origin => {
-        assert.equal(
-            qrSandbox(origin).buildMasaQrTarget('/m/5?token=1').isLocalOnly,
-            false,
-            `${origin} yerel sayılmamalı`
-        );
-    });
+test('the local-only warning box is gone from the QR modal', () => {
+    assert.ok(
+        !/localOnlyWarning|isLocalOnly/.test(kasaSource),
+        'kaldirilan uyari kutusunun kalintisi kodda durmamali'
+    );
+    assert.ok(
+        !kasaSource.includes('yalnızca bu bilgisayarda açılır'),
+        'uyari metni modalde gorunmemeli'
+    );
 });
 
 // ---------------------------------------------------------------------------

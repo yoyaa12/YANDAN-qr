@@ -485,7 +485,13 @@ function renderActiveTicketWorkstation() {
     let grandTotalSum = 0;
     let alreadyPaidSum = 0;
 
-    if (allMasaOrders.length === 0 || openMasaOrders.length === 0 || table.durum === 'bos') {
+    // `openMasaOrders.length === 0` eskiden burada bir cikis sartiydi: masanin
+    // butun siparisleri odenmisse adisyon "Bu masaya ait siparis bulunmuyor"
+    // diye bosaltiliyordu. Odenmis olmak adisyonun KAPANDIGI anlamina gelmez;
+    // masa hala `dolu` ve fis basilmayi bekliyor olabilir. Bosaltilan
+    // `currentTableItems` yuzunden F8 fisi de bos cikiyordu. Adisyonun bittigi
+    // an `odendi_kapatildi` / `bos` ile zaten yakalaniyor.
+    if (allMasaOrders.length === 0 || table.durum === 'bos') {
         currentTableItems = [];
         if (metaEl) {
             metaEl.innerHTML = `<span>Açık Sipariş Bulunmuyor</span>`;
@@ -1558,16 +1564,20 @@ window.printReceiptPreview = function () {
             <div style="font-weight:bold; margin-bottom:4px;">ÖDEME BİLGİLERİ</div>
         `;
 
-        if (paidAtOrderTime > 0.005) {
+        // Kirilim yalnizca IKI kalem de gercekten varken yazilir. Kasada alinan
+        // para siparislere islenip tahsilat satiri kapandiginda (bkz.
+        // `SiparisService._settle_masa_if_covered`) o tutar artik "sipariş
+        // anında ödenen" havuzunda gorunur; tek basina o etiketle basmak
+        // musteriye yanlis bilgi vermek olurdu. Tek kalem varsa yalnizca
+        // toplam yazilir.
+        const showBreakdown = paidAtOrderTime > 0.005 && paidAtTill > 0.005;
+
+        if (showBreakdown) {
             html += `
                 <div style="display:flex; justify-content:space-between;">
                     <span>Sipariş anında ödenen:</span>
                     <span>${paidAtOrderTime.toFixed(2)} TL</span>
                 </div>
-            `;
-        }
-        if (paidAtTill > 0.005) {
-            html += `
                 <div style="display:flex; justify-content:space-between;">
                     <span>Kasada tahsil edilen:</span>
                     <span>${paidAtTill.toFixed(2)} TL</span>
@@ -1878,12 +1888,10 @@ window.confirmVisualTableTransfer = async function () {
  * ile degistigi icin QR sessizce olu bir adres tasiyor, telefonla okutulunca
  * hicbir sey acilmiyordu. Artik tahmin yok: panel hangi adresten aciksa QR de
  * onu tasir. Kasayi LAN adresinden (ornegin http://10.0.0.5:8000/kasa) acmak
- * QR'i dogru yapar; localhost'tan acildiysa asagidaki uyari gorunur.
+ * QR'i telefondan okutulabilir yapar.
  */
-function buildMasaQrTarget(qrUrl) {
-    const origin = window.location.origin;
-    const isLocalOnly = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|$)/i.test(origin);
-    return { url: origin + qrUrl, isLocalOnly: isLocalOnly };
+function buildMasaQrUrl(qrUrl) {
+    return window.location.origin + qrUrl;
 }
 
 /** Verilen metni QR olarak `container` icine SVG halinde cizer. */
@@ -1928,9 +1936,7 @@ window.showDynamicQRModal = async function (masaId) {
             const timerEl = document.getElementById("qrRemainingTimer");
             const linkEl = document.getElementById("modalQRLink");
 
-            const target = buildMasaQrTarget(data.qr_url);
-
-            renderLocalQrCode(qrImg, target.url);
+            renderLocalQrCode(qrImg, buildMasaQrUrl(data.qr_url));
             if (tokenEl) tokenEl.innerText = data.token;
             if (timerEl) timerEl.innerText = data.remaining_seconds;
             if (linkEl) linkEl.href = data.qr_url;
@@ -1944,14 +1950,7 @@ window.showDynamicQRModal = async function (masaId) {
         const res = await fetch(`/api/masalar/${masaId}/dynamic-qr`);
         const data = await res.json();
 
-        const target = buildMasaQrTarget(data.qr_url);
-        // Panel localhost'tan acildiysa QR yalnizca bu bilgisayarda calisir.
-        // Sessizce yanlis bir adres uretmek yerine durum acikca soylenir.
-        const localOnlyWarning = target.isLocalOnly ? `
-                    <div style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.45); color:#fbbf24; padding:8px 10px; border-radius:10px; margin-bottom:12px; font-size:0.72rem; line-height:1.45;">
-                        ⚠️ Bu QR <b>${escapeHtml(window.location.host)}</b> adresini taşıyor ve yalnızca bu bilgisayarda açılır.
-                        Telefondan okutmak için kasa panelini bilgisayarın ağ adresinden açın.
-                    </div>` : '';
+        const qrTargetUrl = buildMasaQrUrl(data.qr_url);
 
         const modalHtml = `
             <div id="kasaQRModal" class="modal-overlay active" style="z-index: 99999; display:flex; align-items:center; justify-content:center;">
@@ -1961,7 +1960,6 @@ window.showDynamicQRModal = async function (masaId) {
                     <h3 style="color:#ffbc00; margin:0 0 6px 0; font-size:1.3rem;">📱 Canlı Dinamik QR (Masa #${escapeHtml(data.masa_no || masaId)})</h3>
                     <p style="font-size:0.82rem; color:#aaa; margin:0 0 18px 0;">Telefon kamerası ile okutarak doğrudan masa oturumuna girebilirsiniz:</p>
                     
-                    ${localOnlyWarning}
                     <div style="background:#ffffff; padding:18px; border-radius:16px; display:inline-block; margin-bottom:18px; box-shadow:0 8px 25px rgba(0,0,0,0.3);">
                         <div id="modalQRImage" role="img" aria-label="Canlı QR Kodu" style="width:200px; height:200px; border-radius:8px;"></div>
                     </div>
@@ -1986,7 +1984,7 @@ window.showDynamicQRModal = async function (masaId) {
             </div>
         `;
         document.body.insertAdjacentHTML("beforeend", modalHtml);
-        renderLocalQrCode(document.getElementById("modalQRImage"), target.url);
+        renderLocalQrCode(document.getElementById("modalQRImage"), qrTargetUrl);
 
         activeQRInterval = setInterval(async () => {
             const timerEl = document.getElementById("qrRemainingTimer");

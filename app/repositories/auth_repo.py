@@ -182,3 +182,55 @@ class AuthRepository:
         """Adisyon kapanınca masadaki tüm müşteri oturumlarını geçersiz kılar."""
         query = "UPDATE CustomerSessions SET is_active = 0 WHERE masa_id = ?"
         self.db.execute_non_query(query, (masa_id,))
+
+    def move_sessions_to_masa(
+        self, session_ids: List[int], from_masa_id: int, to_masa_id: int
+    ) -> int:
+        """Belirtilen oturumlari kaynak masadan hedef masaya tasir.
+
+        `move_active_sessions_to_masa` masanin TAMAMI tasindiginda kullanilir.
+        Bu yol ise kalem tasimasi icindir: adisyonun yalnizca bir kismi
+        tasindiginda kaynak masada oturmaya devam eden musteriler vardir ve
+        onlarin oturumu yerinde kalmalidir.
+
+        `masa_id = from_masa_id` kosulu bilincli: cagiran yanlis bir kimlik
+        gonderse bile baska bir masanin oturumu buradan tasinamaz.
+
+        Etkilenen satir sayisini doner (surucu bildiremezse -1).
+        """
+        if not session_ids:
+            return 0
+        placeholders = ", ".join("?" for _ in session_ids)
+        query = f"""
+            UPDATE CustomerSessions
+            SET masa_id = ?
+            WHERE masa_id = ? AND is_active = 1 AND id IN ({placeholders})
+        """
+        return self.db.execute_update(
+            query, (to_masa_id, from_masa_id, *session_ids)
+        )
+
+    def move_active_sessions_to_masa(self, from_masa_id: int, to_masa_id: int) -> int:
+        """Canlı müşteri oturumlarını hedef masaya taşır.
+
+        Adisyon taşınırken yalnızca `Siparisler.masa_id` güncelleniyordu;
+        oturumlar kaynak masada kalıyordu. Bunun iki görünür sonucu vardı:
+
+        1. Müşteri kendi siparişlerini kaybediyordu. `is_mine` hesabı
+           `Siparisler.customer_session_id` eşitliğine dayanır; istemci hedef
+           masaya geçtiğinde eski oturumu o masada geçersiz olduğu için (bkz.
+           `masalar.get_masa_aktif_siparis` içindeki masa eşleşme kontrolü)
+           QR'ı yeniden okutup YENİ bir oturum satırı açmak zorunda kalıyor,
+           taşınan siparişler ise hâlâ eski satırın kimliğini taşıyordu.
+        2. Adisyon kapanırken oturumlar geride kalıyordu.
+           `revoke_all_sessions_for_masa` hedef masayı süpürür; kaynak masada
+           unutulan satırlar TTL dolana kadar `is_active = 1` kalıyordu.
+
+        Etkilenen satır sayısını döner (sürücü bildiremezse -1).
+        """
+        query = """
+            UPDATE CustomerSessions
+            SET masa_id = ?
+            WHERE masa_id = ? AND is_active = 1
+        """
+        return self.db.execute_update(query, (to_masa_id, from_masa_id))

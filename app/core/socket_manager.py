@@ -137,6 +137,11 @@ async def connect(sid, environ, auth=None):
                     auth_data = {
                         "user_type": "CUSTOMER",
                         "masa_id": masa_id,
+                        # Kalem tasimasinda yalnizca masayi terk eden
+                        # musterilere yayin yapilabilmesi icin gerekli. Cihaz
+                        # kimligi taklit edilebilir; oturum kimligi sunucuda
+                        # dogrulanmis token'dan gelir.
+                        "session_id": int(customer_session["id"]),
                         "session_token": token
                     }
                     logger.info("Musteri baglandi: Masa %s (sid: %s)", masa_id, sid)
@@ -324,6 +329,66 @@ async def on_masa_temizlendi(payload):
             await sio.emit("masa_temizlendi", payload, room=f"table_{m_id}")
         except (ValueError, TypeError):
             pass
+
+
+@event_bus.subscribe("musteri_oturumlari_tasindi")
+async def on_musteri_oturumlari_tasindi(payload):
+    """Kalem taşımasında masayı terk eden müşterileri yeni masaya taşır.
+
+    `masa_tasindi` masanın TAMAMI taşındığında yayınlanır ve kaynak masanın
+    odasındaki herkesi hedefe taşır. Kalem taşımasında bunu yapmak yanlış
+    olurdu: kaynak masada oturmaya devam eden müşteriler de taşındıklarını
+    sanırdı. Bu yüzden hedef yalnızca `session_ids` içinde adı geçen
+    oturumlardır ve olay o soketlere tek tek gönderilir.
+
+    İstemci tarafında ayrı bir olay adı yok: taşınan müşteri normal bir
+    `masa_tasindi` alır, çünkü onun için olan tam olarak budur.
+    """
+    if not isinstance(payload, dict):
+        return
+    try:
+        from_id = int(payload["from_masa_id"])
+        to_id = int(payload["to_masa_id"])
+        moved_ids = {int(s_id) for s_id in payload.get("session_ids") or []}
+    except (KeyError, TypeError, ValueError):
+        return
+    if not moved_ids or from_id == to_id:
+        return
+
+    client_payload = {
+        "from_masa_id": from_id,
+        "from_masa_no": payload.get("from_masa_no", f"Masa {from_id}"),
+        "to_masa_id": to_id,
+        "to_masa_no": payload.get("to_masa_no", f"Masa {to_id}"),
+        "is_move": True,
+    }
+
+    for sid in list(MASA_SESSIONS.get(from_id, set())):
+        try:
+            session = await sio.get_session(sid) or {}
+        except Exception:
+            continue
+        if session.get("user_type") != "CUSTOMER":
+            continue
+        if session.get("session_id") not in moved_ids:
+            continue
+
+        try:
+            await sio.leave_room(sid, f"table_{from_id}")
+            await sio.enter_room(sid, f"table_{to_id}")
+            session["masa_id"] = to_id
+            await sio.save_session(sid, session)
+
+            SID_TO_MASA[sid] = to_id
+            MASA_SESSIONS[from_id].discard(sid)
+            MASA_SESSIONS.setdefault(to_id, set()).add(sid)
+
+            await sio.emit("masa_tasindi", client_payload, to=sid)
+        except Exception:
+            logger.exception("Kismi tasimada musteri soketi guncellenemedi (sid: %s)", sid)
+
+    if from_id in MASA_SESSIONS and not MASA_SESSIONS[from_id]:
+        del MASA_SESSIONS[from_id]
 
 
 @event_bus.subscribe("masa_tasindi")

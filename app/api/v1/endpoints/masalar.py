@@ -57,7 +57,16 @@ async def get_masa_aktif_siparis(
 ) -> MasaAktifSiparisResponse:
     viewer_session_id = None
     if isinstance(actor, dict):
-        if actor["masa_id"] != masa_id:
+        # Masanın tamamı taşındığında oturum hedef masaya bağlanır, istemci ise
+        # bir süre daha eski masayı sorar (socket olayı gecikirse veya kaçarsa
+        # 3 saniyelik yoklama tek kurtarma yoludur). O durumda yetki reddi
+        # yanlış cevaptır: sorulan masanın adisyonu oturumun bağlı olduğu
+        # masada duruyor ve servis katmanı `redirect_masa_id` ile istemciyi
+        # oraya yönlendirir. Yönlendirme dışındaki her masa hâlâ 403'tür.
+        if actor["masa_id"] not in (
+            masa_id,
+            siparis_service.resolve_masa_redirect(masa_id),
+        ):
             raise HTTPException(
                 status_code=403,
                 detail="Bu masanın siparişlerini görüntüleme yetkiniz yok."

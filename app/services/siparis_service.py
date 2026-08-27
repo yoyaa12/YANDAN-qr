@@ -34,6 +34,11 @@ _RECENT_ORDERS_CACHE = {}
 _IDEMPOTENCY_WINDOW_SECONDS = 5
 _IDEMPOTENCY_MAX_ENTRIES = 512
 
+# Para karşılaştırmalarında kuruş altı yuvarlama farkını yutar. DECIMAL(10,2)
+# değerler float'a çevrilirken 89.99999... üretebiliyor; eşitlik testi bu
+# yüzden doğrudan yapılmaz.
+_PAYMENT_EPSILON = 0.005
+
 
 def _prune_idempotency_cache(now: float) -> None:
     """Drop expired entries so the cache cannot grow without bound.
@@ -475,6 +480,16 @@ class SiparisService:
         siparisler = self.siparis_repo.get_all(durum, masa_id)
         return [self._map_to_siparis_response(s) for s in siparisler]
 
+    def resolve_masa_redirect(self, masa_id: int) -> int:
+        """Bu masanın adisyonunun şu an durduğu masa.
+
+        Masa taşındıktan sonra istemci bir süre daha eski masayı sorar. Controller
+        katmanı "bu oturum bu masayı görebilir mi" kararını verirken buna
+        bakmak zorunda: oturum artık hedef masaya bağlıdır ve eski masa kimliği
+        tek başına yetki reddi için yeterli değildir.
+        """
+        return TABLE_MOVES_MAP.get(masa_id, masa_id)
+
     def get_masa_aktif_siparis(
         self, masa_id: int, viewer_session_id: Optional[int] = None
     ) -> MasaAktifSiparisResponse:
@@ -751,8 +766,18 @@ class SiparisService:
         return s_dto
 
     async def move_masa(self, from_masa_id: int, to_masa_id: int) -> None:
+        """Masanın adisyonunu bütün olarak başka masaya taşır.
+
+        Siparişlerle birlikte CANLI MÜŞTERİ OTURUMLARI da taşınır. Oturumlar
+        geride kaldığında adisyon iki parçaya bölünüyordu: siparişler hedef
+        masada, "bu siparişi kim verdi" bilgisi kaynak masada kalıyor,
+        müşteri hedef masada kendi siparişlerini göremiyordu. Aynı kopma
+        adisyon kapanışında da vardı; ayrıntı için
+        `AuthRepository.move_active_sessions_to_masa`.
+        """
         with db_transaction():
             self.siparis_repo.move_orders_between_masalar(from_masa_id, to_masa_id)
+            self.auth_repo.move_active_sessions_to_masa(from_masa_id, to_masa_id)
             from_masa = self.masa_repo.get_by_id(from_masa_id)
             from_masa_no = from_masa.get("masa_no", f"Masa {from_masa_id}") if from_masa else f"Masa {from_masa_id}"
             to_masa = self.masa_repo.get_by_id(to_masa_id)
@@ -866,13 +891,58 @@ class SiparisService:
 
             self.masa_repo.update_durum(to_masa_id, TableStatus.OCCUPIED.value)
 
-        # Kısmi taşımada kaynak masada hâlâ kalem var, bu yüzden masa `dolu`
-        # kalır ve müşteri oturumları da yerinde bırakılır: taşınan hesap, orada
-        # oturmaya devam eden müşterileri kapsamaz.
+            # Kısmi taşımada kaynak masada hâlâ kalem vardır, bu yüzden masa
+            # `dolu` kalır ve orada oturmaya devam eden müşterilerin oturumu
+            # yerinde bırakılır: taşınan hesap onları kapsamıyor.
+            #
+            # Ama bir müşterinin BÜTÜN siparişleri hedef masaya gittiyse o
+            # müşteri de masayı terk etmiştir. Oturumu geride kalırsa istemcisi
+            # eski masayı sormaya devam eder: adisyon toplamı olarak orada
+            # kalanların hesabını görür, kendi siparişlerini ise hiçbir yerde
+            # göremez. Bu yüzden yalnızca o oturumlar taşınır.
+            kaynakta_kalan = set(
+                self.siparis_repo.get_customer_session_ids_with_live_orders(from_masa_id)
+            )
+            hedefe_gecen = set(
+                self.siparis_repo.get_customer_session_ids_with_live_orders(to_masa_id)
+            )
+            tasinan_oturumlar = sorted(hedefe_gecen - kaynakta_kalan)
+            if tasinan_oturumlar:
+                self.auth_repo.move_sessions_to_masa(
+                    tasinan_oturumlar, from_masa_id, to_masa_id
+                )
+
+            hedef_masa = self.masa_repo.get_by_id(to_masa_id)
+            hedef_masa_no = (
+                hedef_masa.get("masa_no", f"Masa {to_masa_id}")
+                if hedef_masa
+                else f"Masa {to_masa_id}"
+            )
+            kaynak_masa = self.masa_repo.get_by_id(from_masa_id)
+            kaynak_masa_no = (
+                kaynak_masa.get("masa_no", f"Masa {from_masa_id}")
+                if kaynak_masa
+                else f"Masa {from_masa_id}"
+            )
+
         await event_bus.publish(
             "masa_durumu_degisti",
             {"masa_id": to_masa_id, "durum": TableStatus.OCCUPIED.value},
         )
+        if tasinan_oturumlar:
+            # Yalnızca taşınan oturumlara gider. Masanın tamamı taşınmadığı için
+            # `masa_tasindi` yayını kaynak masanın odasına gönderilemez: orada
+            # kalan müşteriler de taşındıklarını sanırdı.
+            await event_bus.publish(
+                "musteri_oturumlari_tasindi",
+                {
+                    "from_masa_id": from_masa_id,
+                    "from_masa_no": kaynak_masa_no,
+                    "to_masa_id": to_masa_id,
+                    "to_masa_no": hedef_masa_no,
+                    "session_ids": tasinan_oturumlar,
+                },
+            )
         await event_bus.publish("durum_guncellendi", {"masa_id": from_masa_id})
         await event_bus.publish("durum_guncellendi", {"masa_id": to_masa_id})
         return {"moved_detail_count": len(unique_ids), "full_move": False}
@@ -884,12 +954,49 @@ class SiparisService:
             for masa in self.masa_repo.get_all()
         }
 
+    def _settle_masa_if_covered(self, masa_id: int) -> bool:
+        """Kasadaki tahsilat açık siparişleri karşılıyorsa onları `odendi` yapar.
+
+        `MasaTahsilatlari` masa seviyesindedir ve siparişe bağlanamaz (satırda
+        `siparis_id` yok). Bu yüzden kasada alınan para siparişlerin ödeme
+        durumuna hiç yansımıyordu: hesap toplamı ile ödenen tutar birbirini
+        tutarken adisyon satırları "⏳ Açık" görünmeye devam ediyor, teslim
+        anında da `get_unpaid_count_for_masa` sıfırlanmadığı için masa
+        kendiliğinden kapanmıyordu.
+
+        Karşılanan tahsilat satırları BURADA KAPATILIR (`is_closed = 1`). Bu
+        şart: kapatılmazsa aynı para hem "kasada tahsil edilen" hem de
+        "ödenmiş sipariş" olarak iki kez sayılır ve masaya sonradan eklenen
+        sipariş, hiç ödeme alınmadan ödenmiş görünürdü.
+
+        Kapatılan tutar açık toplamı aşıyorsa (üstü/bahşiş) fark ayrıca
+        saklanmaz: fazla ödeme bu projede modellenmiş bir kavram değil, satır
+        `MasaTahsilatlari` içinde raporlama için durmaya devam eder.
+        """
+        acik_toplam = self.siparis_repo.get_open_orders_total_for_masa(masa_id)
+        if acik_toplam <= _PAYMENT_EPSILON:
+            return False
+
+        tahsil_edilen = self.siparis_repo.get_masa_tahsilat_toplami(masa_id)
+        if tahsil_edilen + _PAYMENT_EPSILON < acik_toplam:
+            return False
+
+        self.siparis_repo.mark_open_orders_paid_for_masa(masa_id)
+        self.siparis_repo.close_tahsilatlar_for_masa(masa_id)
+        return True
+
     async def add_tahsilat(
         self, masa_id: int, tutar: float, odeme_yontemi: str
     ) -> GenelBasariliResponse:
         with db_transaction():
             self.siparis_repo.add_masa_tahsilat(masa_id, tutar, odeme_yontemi)
-            
+            kapandi = self._settle_masa_if_covered(masa_id)
+
         event_payload = {"masa_id": masa_id}
         await event_bus.publish("durum_guncellendi", event_payload)
-        return GenelBasariliResponse(status="success", message="Tahsilat eklendi.")
+        mesaj = (
+            "Tahsilat eklendi, masanın açık siparişleri ödendi olarak işaretlendi."
+            if kapandi
+            else "Tahsilat eklendi."
+        )
+        return GenelBasariliResponse(status="success", message=mesaj)

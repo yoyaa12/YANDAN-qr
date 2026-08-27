@@ -335,5 +335,124 @@ class TestSocketServerCorsPolicy(unittest.TestCase):
         self.assertNotEqual(allowed, ["*"])
 
 
+class PartialTableMoveBroadcastTests(unittest.TestCase):
+    """Kalem taşımasında yalnızca masayı terk eden müşteriye yayın yapılmalı.
+
+    `masa_tasindi` kaynak masanın odasının tamamını hedefe taşır; kalem
+    taşımasında bunu yapmak orada oturmaya devam eden müşterilere de
+    "taşındınız" demek olurdu. Bu yüzden hedef, oturum kimliğiyle seçilir.
+    """
+
+    def setUp(self):
+        from app.core import socket_manager
+
+        self.sm = socket_manager
+        self.sm.MASA_SESSIONS.clear()
+        self.sm.SID_TO_MASA.clear()
+        self.addCleanup(self.sm.MASA_SESSIONS.clear)
+        self.addCleanup(self.sm.SID_TO_MASA.clear)
+
+        # Masa 4'te iki müşteri: 205 kalıyor, 206 masa 6'ya taşındı.
+        self.sm.MASA_SESSIONS[4] = {"sid-kalan", "sid-tasinan"}
+        self.sm.SID_TO_MASA["sid-kalan"] = 4
+        self.sm.SID_TO_MASA["sid-tasinan"] = 4
+        self.sessions = {
+            "sid-kalan": {"user_type": "CUSTOMER", "masa_id": 4, "session_id": 205},
+            "sid-tasinan": {"user_type": "CUSTOMER", "masa_id": 4, "session_id": 206},
+        }
+
+        self.payload = {
+            "from_masa_id": 4,
+            "from_masa_no": "S-4",
+            "to_masa_id": 6,
+            "to_masa_no": "S-6",
+            "session_ids": [206],
+        }
+
+    _DEFAULT = object()
+
+    def _run(self, payload=_DEFAULT):
+        from app.core.socket_manager import on_musteri_oturumlari_tasindi
+
+        async def fake_get_session(sid):
+            return self.sessions.get(sid)
+
+        async def fake_save_session(sid, data):
+            self.sessions[sid] = data
+
+        with patch("app.core.socket_manager.sio.get_session", side_effect=fake_get_session), \
+             patch("app.core.socket_manager.sio.save_session", side_effect=fake_save_session), \
+             patch("app.core.socket_manager.sio.enter_room", new_callable=AsyncMock) as enter, \
+             patch("app.core.socket_manager.sio.leave_room", new_callable=AsyncMock) as leave, \
+             patch("app.core.socket_manager.sio.emit", new_callable=AsyncMock) as emit:
+            import asyncio
+            asyncio.run(
+                on_musteri_oturumlari_tasindi(
+                    self.payload if payload is self._DEFAULT else payload
+                )
+            )
+        return enter, leave, emit
+
+    def test_only_the_moved_guest_is_notified(self):
+        _enter, _leave, emit = self._run()
+
+        self.assertEqual(emit.await_count, 1)
+        self.assertEqual(emit.await_args.kwargs.get("to"), "sid-tasinan")
+        self.assertEqual(emit.await_args.args[0], "masa_tasindi")
+
+    def test_the_notification_carries_both_table_ids(self):
+        _enter, _leave, emit = self._run()
+
+        sent = emit.await_args.args[1]
+        self.assertEqual(sent["from_masa_id"], 4)
+        self.assertEqual(sent["to_masa_id"], 6)
+        self.assertEqual(sent["to_masa_no"], "S-6")
+
+    def test_only_the_moved_guest_changes_rooms(self):
+        enter, leave, _emit = self._run()
+
+        leave.assert_awaited_once_with("sid-tasinan", "table_4")
+        enter.assert_awaited_once_with("sid-tasinan", "table_6")
+
+    def test_the_remaining_guest_keeps_their_table(self):
+        self._run()
+
+        self.assertEqual(self.sm.SID_TO_MASA["sid-kalan"], 4)
+        self.assertEqual(self.sessions["sid-kalan"]["masa_id"], 4)
+        self.assertIn("sid-kalan", self.sm.MASA_SESSIONS[4])
+
+    def test_presence_follows_the_moved_guest(self):
+        self._run()
+
+        self.assertEqual(self.sm.SID_TO_MASA["sid-tasinan"], 6)
+        self.assertEqual(self.sessions["sid-tasinan"]["masa_id"], 6)
+        self.assertIn("sid-tasinan", self.sm.MASA_SESSIONS[6])
+        self.assertNotIn("sid-tasinan", self.sm.MASA_SESSIONS[4])
+
+    def test_a_staff_socket_in_the_room_is_never_moved(self):
+        self.sessions["sid-kalan"] = {"user_type": "STAFF", "role": "garson", "session_id": 206}
+
+        enter, leave, emit = self._run()
+
+        self.assertEqual(emit.await_count, 1)
+        self.assertEqual(emit.await_args.kwargs.get("to"), "sid-tasinan")
+        leave.assert_awaited_once_with("sid-tasinan", "table_4")
+
+    def test_an_empty_session_list_does_nothing(self):
+        payload = dict(self.payload, session_ids=[])
+
+        enter, leave, emit = self._run(payload)
+
+        self.assertEqual(emit.await_count, 0)
+        self.assertEqual(enter.await_count, 0)
+        self.assertEqual(leave.await_count, 0)
+
+    def test_a_malformed_payload_is_ignored(self):
+        for bad in ({}, {"from_masa_id": 4}, {"from_masa_id": "x", "to_masa_id": 6, "session_ids": [1]}, None):
+            with self.subTest(payload=bad):
+                _enter, _leave, emit = self._run(bad)
+                self.assertEqual(emit.await_count, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -398,6 +398,41 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 });
 
+/**
+ * Oturum token'ini eski masanin anahtarindan yeni masanin anahtarina tasir.
+ *
+ * Token `qr_session_token_<masaId>` altinda tutuluyor. Masa tasindiginda
+ * `state.masaId` degisiyor ama anahtar geride kaliyordu: `checkActiveOrder`
+ * hedef masanin anahtarini okuyup bos buluyor, Authorization basligi
+ * gonderilmiyor ve istek 401 aliyordu. Musteri de QR'i yeniden okutmak zorunda
+ * kaliyor, acilan YENI oturum satiri yuzunden tasinmis siparisleri "benim
+ * siparisim" olarak goremiyordu.
+ *
+ * Sunucu tarafinda oturum satirinin kendisi de hedef masaya tasiniyor
+ * (`AuthRepository.move_active_sessions_to_masa`), yani buradaki ham token
+ * hedef masada gecerli kalir.
+ *
+ * Hedefte zaten bir token varsa uzerine yazilmaz: o cihaz hedef masada zaten
+ * kendi oturumunu acmis demektir ve gecerli olan odur.
+ */
+function migrateSessionTokenToMasa(fromMasaId, toMasaId) {
+    if (!fromMasaId || !toMasaId || parseInt(fromMasaId) === parseInt(toMasaId)) return;
+    try {
+        const oldKey = 'qr_session_token_' + parseInt(fromMasaId);
+        const newKey = 'qr_session_token_' + parseInt(toMasaId);
+        const movedToken = localStorage.getItem(oldKey);
+        if (!movedToken) return;
+        if (!localStorage.getItem(newKey)) {
+            localStorage.setItem(newKey, movedToken);
+        }
+        // Eski anahtar her durumda silinir: o oturum artik kaynak masaya ait
+        // degil, orada birakilirsa sonraki ziyarette 403 uretir.
+        localStorage.removeItem(oldKey);
+    } catch (e) {
+        console.error('Oturum token tasima hatasi:', e);
+    }
+}
+
 window.handleTableMove = function (fromMasaId, toMasaId, toMasaNo, fromMasaNo) {
     if (!toMasaId) return;
 
@@ -409,6 +444,7 @@ window.handleTableMove = function (fromMasaId, toMasaId, toMasaNo, fromMasaNo) {
     }
 
     const oldMasaNo = fromMasaNo || state.masaNo || `Masa ${fromMasaId}`;
+    migrateSessionTokenToMasa(fromMasaId, toMasaId);
     state.masaId = parseInt(toMasaId);
     state.masaNo = toMasaNo || `Masa ${toMasaId}`;
 

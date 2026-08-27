@@ -313,6 +313,80 @@ class SiparisRepository:
         """
         self.db.execute_non_query(query, (masa_id, tutar, odeme_yontemi))
 
+    def get_customer_session_ids_with_live_orders(self, masa_id: int) -> List[int]:
+        """Bu masada hala canli siparisi olan musteri oturumlarinin kimlikleri.
+
+        Kalem tasimadan sonra "hangi musteri bu masayi tamamen terk etti"
+        sorusunu yanitlar: hedefte siparisi olup kaynakta hicbir siparisi
+        kalmayan oturum, fiziksel olarak da yeni masaya gecmis demektir.
+
+        Personel tarafindan olusan kayitlarda `customer_session_id` NULL'dur ve
+        bu listeye girmez.
+        """
+        query = """
+            SELECT DISTINCT customer_session_id
+            FROM Siparisler
+            WHERE masa_id = ?
+              AND customer_session_id IS NOT NULL
+              AND siparis_durumu NOT IN (?, ?)
+        """
+        rows = self.db.execute_query(
+            query,
+            (masa_id, OrderStatus.CANCELLED.value, OrderStatus.PAID_CLOSED.value),
+        ) or []
+        return [
+            int(row["customer_session_id"])
+            for row in rows
+            if row.get("customer_session_id") is not None
+        ]
+
+    def get_open_orders_total_for_masa(self, masa_id: int) -> float:
+        """Masada kasada tahsil edilmeyi bekleyen sipariş toplamı.
+
+        Sipariş anında ödenmiş (POS) siparişler dışarıda kalır: onların parası
+        çoktan geldi, kasanın karşılaması gereken tutar bu değildir.
+        """
+        query = """
+            SELECT ISNULL(SUM(toplam_tutar), 0) AS toplam
+            FROM Siparisler
+            WHERE masa_id = ? AND odeme_durumu <> ? AND siparis_durumu NOT IN (?, ?)
+        """
+        res = self.db.execute_query(
+            query,
+            (
+                masa_id,
+                PaymentStatus.PAID.value,
+                OrderStatus.CANCELLED.value,
+                OrderStatus.PAID_CLOSED.value,
+            ),
+            fetch_one=True,
+        )
+        return float(res["toplam"]) if res and res["toplam"] else 0.0
+
+    def mark_open_orders_paid_for_masa(self, masa_id: int) -> int:
+        """Masanın açık siparişlerini `odendi` yapar.
+
+        Yalnızca ödeme durumu değişir; sipariş durumu (mutfak/teslim akışı)
+        korunur. Ödenen bir sipariş hâlâ hazırlanıyor olabilir.
+
+        Etkilenen satır sayısını döner (sürücü bildiremezse -1).
+        """
+        query = """
+            UPDATE Siparisler
+            SET odeme_durumu = ?
+            WHERE masa_id = ? AND odeme_durumu <> ? AND siparis_durumu NOT IN (?, ?)
+        """
+        return self.db.execute_update(
+            query,
+            (
+                PaymentStatus.PAID.value,
+                masa_id,
+                PaymentStatus.PAID.value,
+                OrderStatus.CANCELLED.value,
+                OrderStatus.PAID_CLOSED.value,
+            ),
+        )
+
     def get_masa_tahsilat_toplami(self, masa_id: int) -> float:
         query = "SELECT SUM(tutar) as toplam FROM MasaTahsilatlari WHERE masa_id = ? AND is_closed = 0"
         res = self.db.execute_query(query, (masa_id,), fetch_one=True)
