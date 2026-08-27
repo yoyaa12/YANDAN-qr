@@ -1,9 +1,14 @@
 from fastapi import APIRouter, Depends, Request
 
-from app.auth.dependencies import get_current_staff
+from app.auth.dependencies import get_current_customer, get_current_staff
 from app.auth.models import StaffPrincipal
 from app.services.auth_service import AuthService
-from app.schemas.auth import KullaniciResponse, LoginModel, LoginResponse
+from app.schemas.auth import (
+    KullaniciResponse,
+    LoginModel,
+    LoginResponse,
+    MusteriOturumResponse,
+)
 
 router = APIRouter()
 
@@ -35,3 +40,23 @@ def get_authenticated_staff(
         kullanici_adi=principal.username,
         rol=principal.role,
     )
+
+
+@router.get("/auth/musteri/oturum", response_model=MusteriOturumResponse)
+def get_authenticated_customer_session(
+    session: dict = Depends(get_current_customer),
+) -> MusteriOturumResponse:
+    """Müşteri oturumunun hâlâ geçerli olduğunu doğrular.
+
+    Müşteri menüsü sayfa açılışında bunu çağırır. Daha önce böyle bir yol
+    yoktu: sayfa, elinde 90 dakikalık geçerli bir oturum olsa bile URL'deki 30
+    saniyelik QR kodunu yeniden doğrulatmaya çalışıyordu. Kod çoktan
+    süresini doldurduğu için masada oturan müşteri sayfayı yenilediğinde
+    "Erişim Reddedildi" duvarına çarpıyordu.
+
+    Bu uç yeni bir yetki vermez: `get_current_customer` zaten sipariş
+    yollarının kullandığı doğrulamanın aynısıdır. Geçersiz veya süresi dolmuş
+    oturum 401 alır, yani istemcinin `localStorage`'a yazacağı uydurma bir
+    değer kapıyı açmaz.
+    """
+    return MusteriOturumResponse(masa_id=int(session["masa_id"]))

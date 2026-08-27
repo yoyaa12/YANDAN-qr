@@ -184,6 +184,39 @@ function formatShortMasaNo(masaNo) {
     return str;
 }
 
+/**
+ * Elde saklanan müşteri oturumunun HÂLÂ GEÇERLİ olduğunu SUNUCUYA doğrulatır.
+ *
+ * localStorage'da bir string bulunması hiçbir şey kanıtlamaz: oraya herkes
+ * istediğini yazabilir. Bu yüzden karar sunucunun: `/api/auth/musteri/oturum`
+ * sipariş yollarıyla aynı doğrulamayı çalıştırır ve geçersiz oturuma 401 verir.
+ *
+ * Ağ hatası "geçerli" sayılmaz; böyle bir durumda QR yoluna düşülür.
+ */
+async function hasValidCustomerSession(masaId) {
+    const storageKey = 'qr_session_token_' + masaId;
+    const storedToken = localStorage.getItem(storageKey);
+    if (!storedToken) return false;
+
+    try {
+        const res = await fetch('/api/auth/musteri/oturum', {
+            headers: { 'Authorization': 'Bearer ' + storedToken }
+        });
+        if (!res.ok) {
+            // Ölü token'ı saklamaya devam etmek sonraki isteklerde kafa
+            // karıştırıcı 401'ler üretir.
+            if (res.status === 401) localStorage.removeItem(storageKey);
+            return false;
+        }
+        const data = await res.json();
+        // Sunucu oturumu zaten masaya göre kısıtlıyor; bu karşılaştırma
+        // token'ın yanlış anahtarla saklanmış olma ihtimaline karşı.
+        return Number(data.masa_id) === Number(masaId);
+    } catch (e) {
+        return false;
+    }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
     const urlParams = new URLSearchParams(window.location.search);
     let masaParam = urlParams.get('masa') || '1';
@@ -202,7 +235,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // --- DİNAMİK QR GÜVENLİK KONTROLÜ ---
-    if (state.masaId !== 99) {
+    // Sıra önemli: önce elde var olan oturum sunucuya doğrulatılır, ancak o
+    // yoksa QR kodu istenir.
+    //
+    // Eskiden bu kontrol yoktu ve sayfa her açılışta URL'deki 6 haneli kodu
+    // yeniden doğrulatmaya çalışıyordu. O kod 30 saniyelik (±1 pencere ile
+    // 30-59 sn yaşar), müşterinin oturumu ise 90 dakikalık. Sonuç: masada
+    // oturan müşteri sayfayı yenilediğinde geçerli oturumuna rağmen "Erişim
+    // Reddedildi" görüyordu. Sipariş vermiş olanlar bunu fark etmiyordu, çünkü
+    // sunucudaki cihaz baypası onları kurtarıyordu.
+    const oturumGecerli = state.masaId !== 99 && await hasValidCustomerSession(state.masaId);
+
+    if (state.masaId !== 99 && !oturumGecerli) {
         if (!tokenParam) {
             showSecurityError("Geçersiz giriş! Lütfen masanızdaki QR kodu okutarak sisteme giriniz.");
             return;

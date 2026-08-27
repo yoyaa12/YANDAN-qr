@@ -10,7 +10,17 @@ let tables = [];
 let currentPinDigits = [];
 let activeGarson = null;
 let pendingActionCallback = null;
-let activeBrowsingTables = {}; // { masa_id: { masa_no: 'Masa 1', time: Date.now() } }
+// { masa_id: { masa_no, item_count, last_item, time } }
+// Bu harita iki kaynaktan beslenir: canli socket olaylari ve sayfa acilisinda
+// /api/masalar'in dondugu `secim_durumu` anlik goruntusu. Ikincisi olmadan
+// panel her F5'te bos basliyordu; sunucu kimin masada oldugunu biliyor olmasina
+// ragmen panel hic sormuyordu.
+let activeBrowsingTables = {};
+
+// Menuye bakan bir masanin kaydi bu sureden eski ise dusurulur. Musteri
+// sekmeyi kapatmadan telefonu cebine koyarsa socket 'disconnect' gelmeyebilir;
+// kayit aksi halde vardiya boyunca ekranda kalirdi.
+const BROWSING_ENTRY_TTL_MS = 30 * 60 * 1000;
 let activeDetailMasaId = null;
 let waiterSocket = null;
 
@@ -46,9 +56,16 @@ function initWaiterSocket() {
         showWaiterToast(`👋 MÜŞTERİ GELDİ! ${data.masa_no} menüyü inceliyor.`);
         const masaId = toPositiveInteger(data.masa_id);
         if (masaId !== null) {
-            if (!activeBrowsingTables[masaId]) {
-                activeBrowsingTables[masaId] = { masa_no: data.masa_no, time: Date.now(), item_count: 0, last_item: '' };
-            }
+            // Zaten izlenen bir masa yeniden "geldi" derse sepet icerigi
+            // korunur, yalnizca zaman damgasi tazelenir; aksi halde kayit
+            // musteri hala masadayken TTL'e takilip dusebilirdi.
+            const existing = activeBrowsingTables[masaId];
+            activeBrowsingTables[masaId] = {
+                masa_no: data.masa_no,
+                time: Date.now(),
+                item_count: (existing && existing.item_count) || 0,
+                last_item: (existing && existing.last_item) || ''
+            };
             renderWaiterDashboard();
         }
     });
@@ -124,9 +141,60 @@ function initWaiterSocket() {
     });
 }
 
+// Sunucu, menuye bakan masalari BROWSING_TABLES icinde tutar ve kimligi
+// dogrulanmis personele /api/masalar uzerinden `secim_durumu` olarak doner.
+// Panel bu anlik goruntuyu okumazsa, sayfa yenilendigi anda "menu inceliyor"
+// listesi sifirlanir; sadece o andan sonra gelen socket olaylari gorunur.
+async function syncBrowsingTablesFromServer() {
+    // Istek suresince gelen socket olaylari anlik goruntuden tazedir; asagida
+    // silinmemeleri icin istegin baslama ani olcut alinir.
+    const requestedAt = Date.now();
+
+    let masalar;
+    try {
+        const res = await authFetch('/api/masalar');
+        if (!res.ok) return;
+        masalar = await res.json();
+    } catch (e) {
+        return;
+    }
+    if (!Array.isArray(masalar)) return;
+
+    tables = masalar;
+
+    const serverBrowsingIds = new Set();
+    masalar.forEach(masa => {
+        const masaId = toPositiveInteger(masa && masa.id);
+        const secim = masa && masa.secim_durumu;
+        if (masaId === null || !secim) return;
+
+        serverBrowsingIds.add(masaId);
+        const existing = activeBrowsingTables[masaId];
+        activeBrowsingTables[masaId] = {
+            masa_no: secim.masa_no || masa.masa_no,
+            item_count: secim.item_count || 0,
+            last_item: secim.last_item || '',
+            // Anlik goruntude zaman damgasi yok. Yerel kayit varsa onun zamani
+            // korunur, yoksa kayit bu istekle taze sayilir.
+            time: (existing && Number.isFinite(existing.time)) ? existing.time : requestedAt
+        };
+    });
+
+    Object.keys(activeBrowsingTables).forEach(key => {
+        const masaId = toPositiveInteger(key);
+        if (masaId !== null && serverBrowsingIds.has(masaId)) return;
+        const entry = activeBrowsingTables[key];
+        if (entry && Number.isFinite(entry.time) && entry.time >= requestedAt) return;
+        delete activeBrowsingTables[key];
+    });
+}
+
 async function loadWaiterData() {
     try {
-        const res = await authFetch('/api/siparisler');
+        const [res] = await Promise.all([
+            authFetch('/api/siparisler'),
+            syncBrowsingTablesFromServer()
+        ]);
         if (!res.ok) {
             console.warn("Garson siparişleri yüklenemedi:", res.status);
             allRawOrders = [];
@@ -426,9 +494,24 @@ function updateWaiterSocketBadge(isConnected) {
     }
 }
 
+// Yalnizca yaslanmis kayitlari duser. Onceki surumde bunun yerine harita her
+// render'da tumden bosaltiliyordu; render her socket olayinda calistigi icin
+// panelde daima "en son gelen olay" disindaki tum masalar kayboluyordu.
+function pruneBrowsingTables() {
+    const cutoff = Date.now() - BROWSING_ENTRY_TTL_MS;
+    Object.keys(activeBrowsingTables).forEach(key => {
+        const entry = activeBrowsingTables[key];
+        if (!entry || !Number.isFinite(entry.time) || entry.time < cutoff) {
+            delete activeBrowsingTables[key];
+        }
+    });
+}
+
 function renderWaiterDashboard() {
     const container = document.getElementById('waiterDashboardGrid');
     if (!container) return;
+
+    pruneBrowsingTables();
 
     const activeOrders = waiterOrders.filter(o => ['garson_onayi_bekliyor', 'nakit_bekliyor', 'odendi_mutfakta', 'garson_onayladi_mutfakta', 'hazirlaniyor', 'hazir'].includes(o.siparis_durumu));
 
@@ -526,7 +609,6 @@ function renderWaiterDashboard() {
         `;
     });
 
-    activeBrowsingTables = {}; // Reset browsing tables after rendering to prevent stale tables
     container.innerHTML = html;
 }
 

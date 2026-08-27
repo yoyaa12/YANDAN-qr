@@ -181,15 +181,49 @@ class AuthService:
         return GenelBasariliResponse(status="success", message="Cihaz başarıyla yasaklandı.")
 
     def create_customer_session(self, masa_id: int, device_id: Optional[str] = None) -> str:
-        # Generate a random 64-character hex token
+        """Masa için müşteri oturumu açar ve HAM token'ı döner.
+
+        Aynı cihaz aynı masada zaten oturuyorsa yeni satır açılmaz: var olan
+        oturumun token'ı yerinde yenilenir. Bunun iki nedeni var ve ikincisi
+        daha önemli:
+
+        1. Her QR okutması ayrı bir satır yazdığı için `CustomerSessions`
+           şişiyordu; tek cihaz aynı masada birden çok canlı oturum taşıyordu.
+        2. Sipariş sahipliği `Siparisler.customer_session_id` ile oturum
+           kimliğine bağlı (`SiparisService._map_to_siparis_response`). Yeni
+           satır açmak bu kimliği değiştiriyor, müşterinin biraz önce verdiği
+           sipariş "Benim Siparişlerim" görünümünden düşüyordu.
+
+        Token her çağrıda yeniden üretilir: satırın korunması, eski token'ın
+        yaşamaya devam etmesi anlamına gelmez.
+        """
+        # Ham token yalnızca burada ve istemcide bulunur; saklanan tek şey
+        # SHA-256 hash'idir, yani veritabanını okumak canlı token vermez.
         raw_token = secrets.token_hex(32)
-        # Only the hash is stored, so a database read cannot reveal live tokens.
         token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
 
         expires_at = datetime.now() + timedelta(minutes=CUSTOMER_SESSION_TTL_MINUTES)
 
+        # `device_id` yoksa oturumlar ilişkilendirilemez; tek yapılabilecek yeni
+        # satır açmaktır.
+        existing = (
+            self.repo.get_active_session_for_device(masa_id, device_id)
+            if device_id
+            else None
+        )
+        if existing:
+            session_id = int(existing["id"])
+            self.repo.rotate_customer_session(session_id, token_hash, expires_at)
+            # Düzeltme öncesinden kalmış fazla satırlar varsa burada kapanır.
+            self.repo.revoke_other_sessions_for_device(masa_id, device_id, session_id)
+            return raw_token
+
         self.repo.create_customer_session(token_hash, masa_id, expires_at, device_id)
         return raw_token
+
+    def deactivate_expired_customer_sessions(self) -> int:
+        """Süresi dolmuş oturumları pasife alır (arka plan bakımı)."""
+        return self.repo.deactivate_expired_customer_sessions()
 
     def verify_customer_session(self, raw_token: str) -> Optional[dict]:
         if not raw_token:

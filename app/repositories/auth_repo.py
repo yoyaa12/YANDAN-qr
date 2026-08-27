@@ -106,6 +106,74 @@ class AuthRepository:
         """
         self.db.execute_non_query(query, (expires_at, session_token_hash))
 
+    def get_active_session_for_device(
+        self, masa_id: int, device_id: str
+    ) -> Optional[CustomerSessionEntity]:
+        """Bir cihazın o masadaki canlı oturumu (varsa).
+
+        Aynı cihaz QR'ı ikinci kez okuttuğunda yeni satır açmak yerine bu satır
+        tazelenir; bkz. `AuthService.create_customer_session`.
+        """
+        query = """
+            SELECT TOP 1 id, masa_id, device_id, expires_at
+            FROM CustomerSessions
+            WHERE masa_id = ?
+              AND device_id = ?
+              AND is_active = 1
+              AND expires_at > GETDATE()
+            ORDER BY id DESC
+        """
+        return self.db.execute_query(query, (masa_id, device_id), fetch_one=True)
+
+    def rotate_customer_session(
+        self, session_id: int, session_token_hash: str, expires_at: datetime
+    ) -> None:
+        """Var olan oturumun token'ını ve bitiş zamanını yerinde yeniler.
+
+        Satır kimliği korunur. `Siparisler.customer_session_id` bu kimliğe
+        bakarak "bu sipariş bana ait mi" sorusunu yanıtladığı için, yeni satır
+        açmak müşterinin kendi siparişlerini kaybetmesine yol açıyordu.
+        """
+        query = """
+            UPDATE CustomerSessions
+            SET session_token_hash = ?, expires_at = ?, is_active = 1
+            WHERE id = ?
+        """
+        self.db.execute_non_query(query, (session_token_hash, expires_at, session_id))
+
+    def revoke_other_sessions_for_device(
+        self, masa_id: int, device_id: str, keep_session_id: int
+    ) -> int:
+        """Aynı cihaz + masa için fazladan kalmış canlı oturumları kapatır.
+
+        Düzeltme öncesi her QR okutması yeni satır açtığı için tek cihaz aynı
+        masada birden çok canlı oturum taşıyabiliyordu. Bu yol o birikimi
+        temizler; bundan sonrası için zaten tek satır üretilir.
+        """
+        query = """
+            UPDATE CustomerSessions
+            SET is_active = 0
+            WHERE masa_id = ? AND device_id = ? AND is_active = 1 AND id <> ?
+        """
+        return self.db.execute_update(query, (masa_id, device_id, keep_session_id))
+
+    def deactivate_expired_customer_sessions(self) -> int:
+        """Süresi dolmuş oturumların `is_active` bayrağını düşürür.
+
+        Güvenlik için gerekli değildir: `get_active_customer_session` zaten hem
+        `is_active = 1` hem `expires_at > GETDATE()` arar, yani süresi geçmiş
+        satır bayrağı 1 olsa da kabul edilmez. Gerekli olan şey okunabilirlik:
+        aksi halde tabloya bakan kişi çoktan ölmüş oturumları canlı sanıyor.
+
+        Etkilenen satır sayısını döner (sürücü bildiremezse -1).
+        """
+        query = """
+            UPDATE CustomerSessions
+            SET is_active = 0
+            WHERE is_active = 1 AND expires_at <= GETDATE()
+        """
+        return self.db.execute_update(query)
+
     def revoke_customer_session(self, session_token_hash: str) -> None:
         query = "UPDATE CustomerSessions SET is_active = 0 WHERE session_token_hash = ?"
         self.db.execute_non_query(query, (session_token_hash,))

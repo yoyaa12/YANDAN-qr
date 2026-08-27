@@ -53,3 +53,16 @@ class GarsonPinResponse(BaseModel):
     access_token: str
     token_type: Literal["bearer"] = "bearer"
     expires_in: int = Field(ge=60, le=365 * 24 * 3600)
+
+
+class MusteriOturumResponse(BaseModel):
+    """`GET /api/auth/musteri/oturum` yanıtı.
+
+    Müşteri menüsü sayfa açılışında elindeki oturumun hâlâ geçerli olup
+    olmadığını buradan sorar. Yanıt bilinçli olarak yalnızca masa kimliğini
+    taşır: istemcinin bilmesi gereken tek şey "bu oturum hangi masaya ait".
+    Oturum kimliği veya cihaz kimliği dışarı çıkmaz.
+    """
+
+    valid: Literal[True] = True
+    masa_id: int

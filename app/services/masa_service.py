@@ -1,4 +1,5 @@
 import hashlib
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 from fastapi import Depends, HTTPException, status
@@ -7,7 +8,7 @@ from app.auth.rate_limit import ProcessLocalLoginRateLimiter, qr_verify_limiter
 from app.repositories.auth_repo import AuthRepository
 from app.repositories.masa_repo import MasaRepository
 from app.repositories.siparis_repo import SiparisRepository
-from app.services.auth_service import AuthService
+from app.services.auth_service import AuthService, CUSTOMER_SESSION_TTL_MINUTES
 from app.services.siparis_service import TABLE_MOVES_MAP
 from app.schemas.tables import (
     DinamikQRResponse,
@@ -18,6 +19,10 @@ from app.schemas.tables import (
 from app.database import db_transaction
 from app.core.totp_service import generate_secret_key, generate_dynamic_token, get_seconds_remaining, verify_dynamic_token
 from app.core.socket_manager import get_browsing_tables
+
+# Cihazın "masadayım" kanıtının ömrü. Müşteri oturumuyla aynı tutulur: fiziksel
+# varlık kanıtı, hangi yoldan gelirse gelsin aynı süre yaşamalı.
+DEVICE_PRESENCE_GRACE = timedelta(minutes=CUSTOMER_SESSION_TTL_MINUTES)
 
 class MasaService:
     def __init__(self, repo: MasaRepository = Depends()):
@@ -117,6 +122,38 @@ class MasaService:
                         return True
         return False
 
+    @staticmethod
+    def _device_has_recent_order(
+        aktif_siparisler: List[dict],
+        device_id: str,
+        *,
+        now: Optional[datetime] = None,
+    ) -> bool:
+        """Cihazın bu masada `DEVICE_PRESENCE_GRACE` içinde verilmiş siparişi var mı.
+
+        Bu, QR okutmadan giriş sağlayan baypastır ve eskiden zaman sınırı
+        yoktu: yalnızca "cihazın bu masada kapanmamış siparişi var mı" diye
+        bakılıyordu. Adisyonu kapatılmayı unutulmuş bir masada, günler önce
+        sipariş vermiş bir cihaz TOTP'siz oturum almaya devam edebiliyordu.
+        Fiziksel varlık kanıtı süresiz yaşamamalı.
+
+        Sipariş zamanı okunamıyorsa kanıt sayılmaz: müşteri masadaki QR'ı
+        okutur, yani başarısızlık yönü güvenli taraftır.
+        """
+        if not device_id or not aktif_siparisler:
+            return False
+
+        reference_time = datetime.now() if now is None else now
+        for siparis in aktif_siparisler:
+            if siparis.get("device_id") != device_id:
+                continue
+            created_at = siparis.get("olusturma_tarihi")
+            if not isinstance(created_at, datetime):
+                continue
+            if reference_time - created_at <= DEVICE_PRESENCE_GRACE:
+                return True
+        return False
+
     def _issue_customer_session(self, masa_id: int, device_id: Optional[str]) -> str:
         auth_repo = AuthRepository(db=self.repo.db)
         return AuthService(repo=auth_repo).create_customer_session(masa_id, device_id)
@@ -150,20 +187,19 @@ class MasaService:
                 headers={"Retry-After": str(decision.retry_after_seconds)},
             )
 
-        # 1. Cihaz masada zaten kayıtlı mı?
+        # 1. Cihazın bu masada YAKIN ZAMANDA verilmiş bir siparişi var mı?
         if device_id:
             siparis_repo = SiparisRepository(db=self.repo.db)
             aktif_siparisler = siparis_repo.get_all_active_by_masa_id(masa_id)
 
-            if aktif_siparisler:
-                if any(s.get('device_id') == device_id for s in aktif_siparisler):
-                    limiter.record_success(rate_keys)
-                    return QRDogrulamaResponse(
-                        valid=True,
-                        message="Cihazınız masada kayıtlı, doğrudan giriş yapıldı.",
-                        masa_id=masa_id,
-                        session_token=self._issue_customer_session(masa_id, device_id),
-                    )
+            if self._device_has_recent_order(aktif_siparisler, device_id):
+                limiter.record_success(rate_keys)
+                return QRDogrulamaResponse(
+                    valid=True,
+                    message="Cihazınız masada kayıtlı, doğrudan giriş yapıldı.",
+                    masa_id=masa_id,
+                    session_token=self._issue_customer_session(masa_id, device_id),
+                )
 
         # 2. Normal TOTP doğrulaması
         if self.verify_dynamic_qr_token(masa_id, token):

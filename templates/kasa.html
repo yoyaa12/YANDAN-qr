@@ -6,8 +6,8 @@
     <meta name="viewport"
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Lezzet Dünyası Restoran POS Otomasyonu</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=26">
-    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <link rel="stylesheet" href="/static/css/style.css?v=27">
+    <script src="/static/js/vendor/socket.io.min.js?v=4.7.5"></script>
 </head>
 
 <body class="vega-kasa-body" data-staff-roles="kasa">
@@ -496,7 +496,9 @@
     <script src="/static/js/security.js?v=1"></script>
     <script src="/static/js/ui_confirm.js?v=2"></script>
     <script src="/static/js/staff_auth.js?v=4"></script>
-    <script src="/static/js/kasa.js?v=66"></script>
+    <!-- QR kodu tarayicida uretilir; onceden gorsel api.qrserver.com'dan geliyordu. -->
+    <script src="/static/js/vendor/qrcode-generator.js?v=1.4.4"></script>
+    <script src="/static/js/kasa.js?v=67"></script>
 </body>
 
 </html>

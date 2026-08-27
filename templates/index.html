@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Restoran QR Sipariş & Operasyon Sistemi</title>
-    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/style.css?v=2">
 </head>
 <body>
 
@@ -17,36 +17,21 @@
         </div>
     </header>
 
-    <main class="container" style="max-width: 900px; padding-top: 40px;">
+    <main class="container" style="max-width: 1180px; padding-top: 40px;">
         <div style="text-align: center; margin-bottom: 40px;">
             <h1 style="font-size: 2.2rem; margin-bottom: 12px; background: linear-gradient(135deg, #fff, #94a3b8); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
                 Hoş Geldiniz!
             </h1>
-            <p style="color: var(--text-secondary); font-size: 1.1rem;">
+            <p style="color: var(--text-secondary); font-size: 1.1rem; margin-bottom: 6px;">
                 Test etmek istediğiniz paneli aşağıdaki kartlardan seçerek açabilirsiniz:
+            </p>
+            <p style="color: var(--text-muted, #64748b); font-size: 0.85rem;">
+                Müşteri ekranına yalnızca masadaki QR okutularak girilir; QR kodları Kasa panelinden üretilir.
             </p>
         </div>
 
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 20px;">
             
-            <!-- MÜŞTERİ QR MENÜ -->
-            <div class="portal-card" style="border-top: 4px solid var(--primary);">
-                <div>
-                    <h3 style="font-size: 1.4rem; margin-bottom: 8px;">📱 Müşteri QR Menü</h3>
-                    <p style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.5; margin-bottom: 16px;">
-                        Müşterinin masadaki QR kodunu okuttuğunda karşılaştığı ekran. Ürün seçimi, pizza boyutları, ekstra tatlı sosları, malzeme çıkarma ve simüle ödeme yapılabilir.
-                    </p>
-                </div>
-                <div style="display: flex; flex-direction: column; gap: 8px;">
-                    <a id="btnMasa1" href="/menu?masa=1" onclick="openDynamicMasaLink(1); return false;" class="btn-add" style="justify-content: center;">
-                        🪑 Masa 1 QR Menüsü Aç
-                    </a>
-                    <a id="btnMasa2" href="/menu?masa=2" onclick="openDynamicMasaLink(2); return false;" class="btn-add" style="justify-content: center; background: rgba(255,255,255,0.08); color:#fff; box-shadow:none;">
-                        🪑 Masa 2 QR Menüsü Aç
-                    </a>
-                </div>
-            </div>
-
             <!-- MUTFAK PANELİ -->
             <div class="portal-card" style="border-top: 4px solid var(--danger);">
                 <div>
@@ -102,15 +87,5 @@
         </div>
     </main>
 
-    <script>
-        async function openDynamicMasaLink(masaId) {
-            if ((window.location.hostname === '192.168.1.100' || window.location.host === '192.168.1.100:8000') && masaId === 1) {
-                masaId = 99;
-            }
-            // The public landing page may preview the menu, but it must never
-            // mint a current physical-presence token for an arbitrary table.
-            window.location.href = `/menu?masa=${masaId}`;
-        }
-    </script>
 </body>
 </html>

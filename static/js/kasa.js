@@ -1862,6 +1862,55 @@ window.confirmVisualTableTransfer = async function () {
     }
 };
 
+// Kasa ekranindaki QR artik tarayicida uretiliyor. Onceden gorsel
+// api.qrserver.com'dan cekiliyordu ve olculen bedel suydu: ilk acilista 650 ms
+// (DNS + TLS), sonraki her uretimde ~100 ms. Token 30 saniyede bir yenilendigi
+// icin bu bedel modal acik kaldigi surece tekrar tekrar odeniyordu; internet
+// yokken de QR karesi hic gelmiyordu.
+//
+// Yerel uretim `static/js/vendor/qrcode-generator.js` (MIT) ile yapilir.
+
+/**
+ * QR'in tasiyacagi mutlak adresi kurar.
+ *
+ * Onceden burada sabit kodlanmis bir "http://192.168.1.100:8000" vardi: panel
+ * localhost'tan acildiginda QR bu adrese isaret ediyordu. Makinenin IP'si DHCP
+ * ile degistigi icin QR sessizce olu bir adres tasiyor, telefonla okutulunca
+ * hicbir sey acilmiyordu. Artik tahmin yok: panel hangi adresten aciksa QR de
+ * onu tasir. Kasayi LAN adresinden (ornegin http://10.0.0.5:8000/kasa) acmak
+ * QR'i dogru yapar; localhost'tan acildiysa asagidaki uyari gorunur.
+ */
+function buildMasaQrTarget(qrUrl) {
+    const origin = window.location.origin;
+    const isLocalOnly = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|$)/i.test(origin);
+    return { url: origin + qrUrl, isLocalOnly: isLocalOnly };
+}
+
+/** Verilen metni QR olarak `container` icine SVG halinde cizer. */
+function renderLocalQrCode(container, text) {
+    if (!container) return;
+    if (typeof qrcode !== 'function') {
+        container.textContent = 'QR kütüphanesi yüklenemedi';
+        return;
+    }
+    try {
+        // 0 = surumu veri boyutuna gore otomatik sec, 'M' = %15 hata duzeltme.
+        const qr = qrcode(0, 'M');
+        qr.addData(text);
+        qr.make();
+        container.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+        const svg = container.querySelector('svg');
+        if (svg) {
+            svg.setAttribute('width', '200');
+            svg.setAttribute('height', '200');
+            svg.style.display = 'block';
+        }
+    } catch (e) {
+        console.error('QR üretilemedi:', e);
+        container.textContent = 'QR üretilemedi';
+    }
+}
+
 let activeQRInterval = null;
 
 window.showDynamicQRModal = async function (masaId) {
@@ -1879,14 +1928,9 @@ window.showDynamicQRModal = async function (masaId) {
             const timerEl = document.getElementById("qrRemainingTimer");
             const linkEl = document.getElementById("modalQRLink");
 
-            let baseOrigin = window.location.origin;
-            if (baseOrigin.includes("localhost") || baseOrigin.includes("127.0.0.1")) {
-                baseOrigin = "http://192.168.1.100:8000";
-            }
-            const qrTargetUrl = baseOrigin + data.qr_url;
-            const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(qrTargetUrl)}`;
+            const target = buildMasaQrTarget(data.qr_url);
 
-            if (qrImg) qrImg.src = qrApiUrl;
+            renderLocalQrCode(qrImg, target.url);
             if (tokenEl) tokenEl.innerText = data.token;
             if (timerEl) timerEl.innerText = data.remaining_seconds;
             if (linkEl) linkEl.href = data.qr_url;
@@ -1900,12 +1944,14 @@ window.showDynamicQRModal = async function (masaId) {
         const res = await fetch(`/api/masalar/${masaId}/dynamic-qr`);
         const data = await res.json();
 
-        let baseOrigin = window.location.origin;
-        if (baseOrigin.includes("localhost") || baseOrigin.includes("127.0.0.1")) {
-            baseOrigin = "http://192.168.1.100:8000";
-        }
-        const qrTargetUrl = baseOrigin + data.qr_url;
-        const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(qrTargetUrl)}`;
+        const target = buildMasaQrTarget(data.qr_url);
+        // Panel localhost'tan acildiysa QR yalnizca bu bilgisayarda calisir.
+        // Sessizce yanlis bir adres uretmek yerine durum acikca soylenir.
+        const localOnlyWarning = target.isLocalOnly ? `
+                    <div style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.45); color:#fbbf24; padding:8px 10px; border-radius:10px; margin-bottom:12px; font-size:0.72rem; line-height:1.45;">
+                        ⚠️ Bu QR <b>${escapeHtml(window.location.host)}</b> adresini taşıyor ve yalnızca bu bilgisayarda açılır.
+                        Telefondan okutmak için kasa panelini bilgisayarın ağ adresinden açın.
+                    </div>` : '';
 
         const modalHtml = `
             <div id="kasaQRModal" class="modal-overlay active" style="z-index: 99999; display:flex; align-items:center; justify-content:center;">
@@ -1915,8 +1961,9 @@ window.showDynamicQRModal = async function (masaId) {
                     <h3 style="color:#ffbc00; margin:0 0 6px 0; font-size:1.3rem;">📱 Canlı Dinamik QR (Masa #${escapeHtml(data.masa_no || masaId)})</h3>
                     <p style="font-size:0.82rem; color:#aaa; margin:0 0 18px 0;">Telefon kamerası ile okutarak doğrudan masa oturumuna girebilirsiniz:</p>
                     
+                    ${localOnlyWarning}
                     <div style="background:#ffffff; padding:18px; border-radius:16px; display:inline-block; margin-bottom:18px; box-shadow:0 8px 25px rgba(0,0,0,0.3);">
-                        <img id="modalQRImage" src="${qrApiUrl}" width="200" height="200" alt="Canlı QR Kodu" style="display:block; border-radius:8px;">
+                        <div id="modalQRImage" role="img" aria-label="Canlı QR Kodu" style="width:200px; height:200px; border-radius:8px;"></div>
                     </div>
                     
                     <div style="background:rgba(255,255,255,0.05); padding:10px; border-radius:12px; margin-bottom:12px; display:flex; flex-direction:column; align-items:center; gap:4px;">
@@ -1939,6 +1986,7 @@ window.showDynamicQRModal = async function (masaId) {
             </div>
         `;
         document.body.insertAdjacentHTML("beforeend", modalHtml);
+        renderLocalQrCode(document.getElementById("modalQRImage"), target.url);
 
         activeQRInterval = setInterval(async () => {
             const timerEl = document.getElementById("qrRemainingTimer");

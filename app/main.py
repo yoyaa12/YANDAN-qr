@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import os
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -5,12 +7,31 @@ from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 import socketio
 
-from app.database import execute_non_query
+from app.core.session_maintenance import run_session_maintenance
 from app.core.socket_manager import sio
 from app.api.views import router as views_router
 from app.api.v1.api import api_router
 
-app = FastAPI(title="QR Restoran Sipariş Otomasyonu API")
+
+@contextlib.asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Uygulama ömrü boyunca çalışan arka plan işleri.
+
+    Süresi dolan müşteri oturumlarının `is_active` bayrağını düşüren süpürme
+    burada başlatılır. Görev ilk turunu hemen çalıştırır, bu yüzden ayrıca bir
+    açılış süpürmesi gerekmez; başlangıçta veritabanı erişilemezse hata görevin
+    içinde yutulur ve açılış bloklanmaz.
+    """
+    maintenance_task = asyncio.create_task(run_session_maintenance())
+    try:
+        yield
+    finally:
+        maintenance_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await maintenance_task
+
+
+app = FastAPI(title="QR Restoran Sipariş Otomasyonu API", lifespan=lifespan)
 
 
 

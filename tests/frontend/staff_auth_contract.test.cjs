@@ -57,10 +57,48 @@ test('staff helper covers every route protected in the current HTTP batch', () =
 });
 
 test('public landing page cannot mint a physical-presence token', () => {
+    // Bu test daha once silinmis bir fonksiyonun tam satirina sabitlenmisti.
+    // Korunmasi gereken sey o satir degil, ozellik: kimlik istemeyen ana sayfa
+    // hicbir masa icin fiziksel varlik kaniti uretemez.
     const source = read('templates/index.html');
 
-    assert.doesNotMatch(source, /fetch\(`\/api\/masalar\/\$\{masaId\}\/dynamic-qr`\)/);
-    assert.match(source, /window\.location\.href = `\/menu\?masa=\$\{masaId\}`/);
+    assert.doesNotMatch(source, /dynamic-qr/, 'ana sayfa canli QR tokeni isteyemez');
+    assert.doesNotMatch(source, /verify-qr/, 'ana sayfa musteri oturumu actiramaz');
+    assert.doesNotMatch(
+        source,
+        /\/menu\?masa=[^"'\s]*[?&]token=/,
+        'ana sayfa hazir token gomulu bir menu linki tasiyamaz'
+    );
+});
+
+test('any landing page menu link may only target the token-free developer table', () => {
+    // Ana sayfada musteri menusune baglanti bulunmak ZORUNDA degil: musteri
+    // ekranina masadaki QR okutularak girilir. Ama bir baglanti varsa yalnizca
+    // Developer Masasi'ni gosterebilir.
+    //
+    // Onceden burada `masa=1` ve `masa=2` vardi. Ikisi de oluydu: o masalar
+    // veritabanindan silinmisti (en kucuk masa id'si 5) ve token de
+    // tasimadiklari icin "Erisim Reddedildi" veriyorlardi.
+    const landing = read('templates/index.html');
+
+    const masaLinkleri = [...landing.matchAll(/\/menu\?masa=(\d+)/g)].map(m => m[1]);
+    const izinsiz = masaLinkleri.filter(id => id !== '99');
+
+    assert.deepEqual(
+        izinsiz,
+        [],
+        `ana sayfa yalnizca Developer Masasi'na baglanabilir, su id'ler bulundu: ${izinsiz.join(', ')}`
+    );
+});
+
+test('the developer table id stays in sync between landing page and app.js', () => {
+    // app.js token muafiyetini sabit 99 ile taniyor. Ana sayfa bir gun yeniden
+    // menuye baglanirsa iki tarafin ayni id'yi kullandigi garanti olmali.
+    assert.match(
+        read('static/js/app.js'),
+        /state\.masaId !== 99/,
+        'Developer Masasi id`si app.js`te degismis; ana sayfadaki baglanti da guncellenmeli'
+    );
 });
 
 test('waiter identity is restored from StaffAuth, not browser-trusted local data', () => {
