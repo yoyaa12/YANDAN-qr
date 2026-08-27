@@ -64,12 +64,71 @@ class SiparisRepository:
         birim_fiyat: float,
         urun_notu: str,
         ara_toplam: float,
-    ) -> None:
+        opsiyon_ids: Optional[List[int]] = None,
+    ) -> Optional[int]:
+        """Kalemi ve secilen opsiyonlarini yazar; kalem kimligini doner.
+
+        Opsiyonlar ayri bir tabloda (`SiparisDetayOpsiyonlari`) tutulur, metin
+        olarak degil. Boylece "bu kalemde hangi secenek isaretlendi" sorusu
+        siparis notunu ayristirmadan yanitlanabilir; personelin duzenleme
+        ekrani da kalemi opsiyonlariyla birlikte geri gonderebilir.
+        """
+        # `OUTPUT INSERTED.id` bilincli: `execute_non_query` yeni kimligi ayri
+        # bir batch'te `SCOPE_IDENTITY()` ile okuyor ve SCOPE_IDENTITY baska bir
+        # batch'ten cagrildiginda NULL doner. Kimlik burada zorunlu -- opsiyon
+        # secimleri ona bagli yaziliyor -- bu yuzden INSERT'in kendisinden
+        # alinir.
         query = """
             INSERT INTO SiparisDetaylari (siparis_id, urun_id, adet, birim_fiyat, urun_notu, ara_toplam)
+            OUTPUT INSERTED.id
             VALUES (?, ?, ?, ?, ?, ?)
         """
-        self.db.execute_non_query(query, (siparis_id, urun_id, adet, birim_fiyat, urun_notu, ara_toplam))
+        row = self.db.execute_query(
+            query,
+            (siparis_id, urun_id, adet, birim_fiyat, urun_notu, ara_toplam),
+            fetch_one=True,
+        )
+        detay_id = int(row["id"]) if row and row.get("id") is not None else None
+
+        if detay_id and opsiyon_ids:
+            for opsiyon_id in opsiyon_ids:
+                self.db.execute_non_query(
+                    "INSERT INTO SiparisDetayOpsiyonlari (siparis_detay_id, opsiyon_id) VALUES (?, ?)",
+                    (detay_id, opsiyon_id),
+                )
+        return detay_id
+
+    def get_opsiyon_ids_for_siparis(self, siparis_id: int) -> dict:
+        """Siparisin butun kalemleri icin secili opsiyon kimlikleri.
+
+        Kalem basina ayri sorgu yerine tek sorgu: 10 kalemlik bir siparis
+        aksi halde 10 gidis-donus uretirdi.
+        """
+        query = """
+            SELECT sdo.siparis_detay_id, sdo.opsiyon_id
+            FROM SiparisDetayOpsiyonlari sdo
+            JOIN SiparisDetaylari sd ON sdo.siparis_detay_id = sd.id
+            WHERE sd.siparis_id = ?
+            ORDER BY sdo.opsiyon_id ASC
+        """
+        rows = self.db.execute_query(query, (siparis_id,)) or []
+        grouped: dict = {}
+        for row in rows:
+            grouped.setdefault(int(row["siparis_detay_id"]), []).append(int(row["opsiyon_id"]))
+        return grouped
+
+    def delete_detay_opsiyonlari_for_siparis(self, siparis_id: int) -> None:
+        """Kalemler silinmeden once cocuk satirlari temizler.
+
+        `SiparisDetayOpsiyonlari.siparis_detay_id` bir foreign key: once bu
+        satirlar gitmezse `SiparisDetaylari` silinemez. Cascade yerine acik
+        silme tercih edildi; silmenin nerede oldugu okunurken gorunmeli.
+        """
+        query = """
+            DELETE FROM SiparisDetayOpsiyonlari
+            WHERE siparis_detay_id IN (SELECT id FROM SiparisDetaylari WHERE siparis_id = ?)
+        """
+        self.db.execute_non_query(query, (siparis_id,))
 
     def get_all(
         self, durum: Optional[str] = None, masa_id: Optional[int] = None
@@ -90,7 +149,15 @@ class SiparisRepository:
 
     def get_siparis_detaylari(self, siparis_id: int) -> List[SiparisDetayWithUrunEntity]:
         query = "SELECT sd.*, u.urun_adi FROM SiparisDetaylari sd JOIN Urunler u ON sd.urun_id = u.id WHERE sd.siparis_id = ?"
-        return self.db.execute_query(query, (siparis_id,)) or []
+        detaylar = self.db.execute_query(query, (siparis_id,)) or []
+        if not detaylar:
+            return []
+
+        opsiyon_map = self.get_opsiyon_ids_for_siparis(siparis_id)
+        for detay in detaylar:
+            detay_id = detay.get("id")
+            detay["opsiyon_ids"] = opsiyon_map.get(int(detay_id), []) if detay_id else []
+        return detaylar
 
     def get_all_active_by_masa_id(self, masa_id: int) -> List[SiparisWithMasaEntity]:
         """Masanın kapanmamış siparişleri (iptal ve kapatılmış olanlar hariç)."""
@@ -228,6 +295,9 @@ class SiparisRepository:
         else:
             self.db.execute_non_query("UPDATE Siparisler SET toplam_tutar = ? WHERE id = ?", (toplam_tutar, siparis_id))
 
+        # Sira zorunlu: cocuk satirlar (opsiyon secimleri) once gitmezse
+        # foreign key yuzunden kalemler silinemez.
+        self.delete_detay_opsiyonlari_for_siparis(siparis_id)
         self.db.execute_non_query("DELETE FROM SiparisDetaylari WHERE siparis_id = ?", (siparis_id,))
         for line in priced_items:
             self.create_siparis_detay(
@@ -237,6 +307,7 @@ class SiparisRepository:
                 line["birim_fiyat"],
                 line.get("urun_notu") or "",
                 line["ara_toplam"],
+                line.get("opsiyon_ids") or [],
             )
 
     def get_movable_detail_rows(self, masa_id: int) -> List[SiparisDetayWithUrunEntity]:

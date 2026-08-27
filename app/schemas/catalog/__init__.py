@@ -8,6 +8,7 @@
 from app.schemas.catalog.entity import (
     KategoriEntity,
     UrunEntity,
+    UrunOpsiyonEntity,
     UrunWithKategoriEntity,
 )
 from app.schemas.catalog.request import (
@@ -24,6 +25,7 @@ from app.schemas.catalog.request import (
 from app.schemas.catalog.response import (
     KaldirilanMenuResponse,
     KategoriResponse,
+    UrunOpsiyonResponse,
     UrunResponse,
 )
 
@@ -31,6 +33,7 @@ __all__ = [
     # entity
     "KategoriEntity",
     "UrunEntity",
+    "UrunOpsiyonEntity",
     "UrunWithKategoriEntity",
     # request
     "ACIKLAMA_MAX",
@@ -45,5 +48,6 @@ __all__ = [
     # response
     "KaldirilanMenuResponse",
     "KategoriResponse",
+    "UrunOpsiyonResponse",
     "UrunResponse",
 ]

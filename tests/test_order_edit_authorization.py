@@ -107,7 +107,8 @@ class TestOrderEditPricing(OrderEditTestBase):
         self.assertEqual(priced[0]["birim_fiyat"], 100.0)
         self.assertEqual(priced[0]["ara_toplam"], 200.0)
 
-    def test_note_option_surcharge_is_applied_server_side(self):
+    def test_a_note_no_longer_changes_the_price_on_the_edit_path(self):
+        """Duzenleme yolu da notu fiyat kaynagi olarak kullanmaz."""
         data = SiparisDuzenleModel(
             toplam_tutar=1.0,
             urunler=[SiparisItemModel(urun_id=1, adet=1, birim_fiyat=1.0, urun_notu="Orta Boy")],
@@ -115,7 +116,28 @@ class TestOrderEditPricing(OrderEditTestBase):
         self._edit(data)
 
         priced = self.mock_siparis_repo.replace_siparis_items.call_args[0][2]
-        self.assertEqual(priced[0]["birim_fiyat"], 140.0)  # 100 + 40
+        self.assertEqual(priced[0]["birim_fiyat"], 100.0, "not fiyati degistirmemeli")
+
+    def test_option_ids_survive_an_edit(self):
+        """Duzenleme opsiyon farkini sessizce sifirlamamali.
+
+        Personel ekrani kalemi oldugu gibi geri gonderdiginde secim de geri
+        gelir; aksi halde bir "kaydet" tiklamasi buyuk boy pizzayi taban
+        fiyatina dusururdu.
+        """
+        self.mock_urun_repo.get_opsiyonlar_by_ids.return_value = [
+            {"id": 3, "grup": "boy", "kod": "large", "ad": "Büyük Boy",
+             "fiyat_farki": 85.0, "fiyat_carpani": None}
+        ]
+        data = SiparisDuzenleModel(
+            toplam_tutar=1.0,
+            urunler=[SiparisItemModel(urun_id=1, adet=1, birim_fiyat=1.0, opsiyon_ids=[3])],
+        )
+        self._edit(data)
+
+        priced = self.mock_siparis_repo.replace_siparis_items.call_args[0][2]
+        self.assertEqual(priced[0]["birim_fiyat"], 185.0, "100 + 85")
+        self.assertEqual(priced[0]["opsiyon_ids"], [3])
 
     def test_audit_name_comes_from_principal_not_request(self):
         data = SiparisDuzenleModel(
@@ -233,20 +255,51 @@ class TestRepositoryTakesNoClientModel(unittest.TestCase):
         from app.repositories.siparis_repo import SiparisRepository
 
         db = MagicMock()
+        # Kalem INSERT'i yeni kimligi `OUTPUT INSERTED.id` ile dondurur; sahte
+        # veritabani da onu taklit etmeli, yoksa opsiyon satirlari yazilamaz.
+        db.execute_query.return_value = {"id": 77}
         repo = SiparisRepository(db=db)
         repo.replace_siparis_items(
             5,
             250.0,
-            [{"urun_id": 9, "adet": 2, "birim_fiyat": 125.0, "urun_notu": "", "ara_toplam": 250.0}],
+            [{
+                "urun_id": 9, "adet": 2, "birim_fiyat": 125.0,
+                "urun_notu": "", "ara_toplam": 250.0, "opsiyon_ids": [3],
+            }],
             "garson_ayse",
         )
 
         detay_calls = [
-            c for c in db.execute_non_query.call_args_list
+            c for c in db.execute_query.call_args_list
             if "INSERT INTO SiparisDetaylari" in c[0][0]
         ]
         self.assertEqual(len(detay_calls), 1)
         self.assertEqual(detay_calls[0][0][1], (5, 9, 2, 125.0, "", 250.0))
+
+        opsiyon_calls = [
+            c for c in db.execute_non_query.call_args_list
+            if "INSERT INTO SiparisDetayOpsiyonlari" in c[0][0]
+        ]
+        self.assertEqual(len(opsiyon_calls), 1, "secilen opsiyon da yazilmali")
+        self.assertEqual(opsiyon_calls[0][0][1], (77, 3))
+
+    def test_replace_deletes_option_rows_before_the_lines(self):
+        """Foreign key sirasi: cocuk satirlar once gitmezse kalemler silinemez."""
+        from app.repositories.siparis_repo import SiparisRepository
+
+        db = MagicMock()
+        db.execute_query.return_value = {"id": 90}
+        repo = SiparisRepository(db=db)
+        repo.replace_siparis_items(
+            5, 100.0,
+            [{"urun_id": 1, "adet": 1, "birim_fiyat": 100.0, "urun_notu": "", "ara_toplam": 100.0}],
+            None,
+        )
+
+        sqls = [c[0][0] for c in db.execute_non_query.call_args_list]
+        opsiyon_delete = next(i for i, q in enumerate(sqls) if "DELETE FROM SiparisDetayOpsiyonlari" in q)
+        kalem_delete = next(i for i, q in enumerate(sqls) if "DELETE FROM SiparisDetaylari" in q)
+        self.assertLess(opsiyon_delete, kalem_delete)
 
     def test_legacy_client_priced_writer_is_gone(self):
         from app.repositories.siparis_repo import SiparisRepository

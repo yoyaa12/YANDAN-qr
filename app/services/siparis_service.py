@@ -91,39 +91,85 @@ class SiparisService:
             
         return odeme_durumu, siparis_durumu
 
+    def _resolve_line_options(
+        self, item, opsiyon_map: Dict[int, dict]
+    ) -> List[dict]:
+        """Istenen opsiyon kimliklerini katalog satirlarina cevirir ve dogrular.
+
+        Iki kural burada uygulanir:
+
+        1. Bilinmeyen veya pasiflestirilmis bir kimlik REDDEDILIR. Sessizce
+           atlansaydi, kapatilmis bir opsiyonun kimligini gonderen istemci o
+           farki odemeden urunu almis olurdu.
+        2. Bir gruptan (boy / porsiyon) yalnizca BIR opsiyon secilebilir. Eski
+           metin eslesmeli kodda bu yapisal olarak imkansizdi: notta iki boy
+           birden gectiginde fiyati `elif` zincirindeki sira belirliyordu.
+        """
+        istenen = list(item.opsiyon_ids or [])
+        if not istenen:
+            return []
+
+        secili = [opsiyon_map[o_id] for o_id in istenen if o_id in opsiyon_map]
+        if len(secili) != len(istenen):
+            bulunamayan = sorted(set(istenen) - set(opsiyon_map))
+            raise HTTPException(
+                status_code=400,
+                detail=f"Gecersiz veya satisa kapali urun secenegi: {bulunamayan}",
+            )
+
+        gruplar: Dict[str, str] = {}
+        for opsiyon in secili:
+            grup = str(opsiyon.get("grup") or "")
+            if grup in gruplar:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"'{grup}' grubundan yalnizca bir secenek secilebilir "
+                        f"('{gruplar[grup]}' ve '{opsiyon.get('ad')}' birlikte gonderildi)."
+                    ),
+                )
+            gruplar[grup] = str(opsiyon.get("ad") or "")
+
+        return secili
+
     def _calculate_item_authoritative_price(
         self,
         u_info: dict,
         item,
+        secili_opsiyonlar: List[dict],
         *,
         reject_underpriced_claim: bool = True,
     ) -> tuple[float, float]:
+        """Kalemin birim ve satir fiyatini KATALOGDAN hesaplar.
+
+        `item.urun_notu` bu hesaba HIC girmez. Onceden giriyordu: fiyat farki
+        hicbir tabloda tutulmadigi icin sunucu, musterinin serbest metninde
+        "Orta Boy" gibi ifadeler ariyordu. Uc ayri kusur uretiyordu ve ucu de
+        ayni kokten geliyordu:
+
+        - "En Buyuk Boy" metni "Buyuk Boy" metnini icerdigi icin `elif` zinciri
+          en pahali dala hicbir girdiyle ulasamiyordu; +140 satiri olu koddu ve
+          en pahali boy bir alt boyun fiyatina satiliyordu.
+        - Notta iki boy birden gecerse fiyati zincirdeki sira belirliyordu.
+        - Musterinin not kutusuna yazdigi metin fiyati degistirebiliyordu.
+
+        Artik fiyat farki `UrunOpsiyonlari` tablosundan, secilen kimlikler
+        uzerinden okunur. Bir opsiyon ya taban fiyati CARPAR (porsiyon) ya da
+        ustune EKLER (boy, ekstra); ikisi birden olamaz, veritabanindaki
+        `CK_UrunOpsiyonlari_tek_mekanizma` kisiti bunu garanti eder.
+        """
         base_price = float(u_info.get("fiyat", 0.0))
-        calculated_unit_price = base_price
-        note = (item.urun_notu or "").strip()
 
-        if "Orta Boy" in note:
-            calculated_unit_price += 40.0
-        elif "Büyük Boy" in note:
-            calculated_unit_price += 85.0
-        elif "En Büyük Boy" in note:
-            calculated_unit_price += 140.0
+        carpan = 1.0
+        ek_tutar = 0.0
+        for opsiyon in secili_opsiyonlar:
+            fiyat_carpani = opsiyon.get("fiyat_carpani")
+            if fiyat_carpani is not None:
+                carpan *= float(fiyat_carpani)
+            else:
+                ek_tutar += float(opsiyon.get("fiyat_farki") or 0.0)
 
-        if "1.5 Porsiyon" in note:
-            calculated_unit_price += round(base_price * 0.40, 2)
-        elif "2 Porsiyon" in note or "Çift Porsiyon" in note:
-            calculated_unit_price += round(base_price * 0.80, 2)
-
-        if "Manda Kaymağı" in note:
-            calculated_unit_price += 35.0
-        if "Maraş Dondurması" in note:
-            calculated_unit_price += 40.0
-        if "Çikolata Sosu" in note:
-            calculated_unit_price += 25.0
-        if "Antep Fıstığı" in note:
-            calculated_unit_price += 30.0
-
-        expected_unit_price = round(calculated_unit_price, 2)
+        expected_unit_price = round(round(base_price * carpan, 2) + ek_tutar, 2)
 
         # Tamper signal only. The charged price is always expected_unit_price;
         # this guard merely rejects a client that openly claims a price below
@@ -132,7 +178,7 @@ class SiparisService:
         if reject_underpriced_claim and item.birim_fiyat < base_price:
             raise HTTPException(
                 status_code=400,
-                detail=f"'{u_info.get('urun_adi')}' için gönderilen birim fiyat ({item.birim_fiyat} TL) veritabanı taban fiyatından ({base_price} TL) düşük olamaz."
+                detail=f"'{u_info.get('urun_adi')}' icin gonderilen birim fiyat ({item.birim_fiyat} TL) veritabani taban fiyatindan ({base_price} TL) dusuk olamaz."
             )
 
         line_total = round(item.adet * expected_unit_price, 2)
@@ -153,6 +199,18 @@ class SiparisService:
         priced: List[PricedOrderLine] = []
         order_total = 0.0
 
+        # Sepetteki butun opsiyonlar TEK sorguda okunur. Kalem basina ayri
+        # sorgu, 10 kalemlik bir sepette 10 gidis-donus demekti.
+        tum_opsiyon_ids = {
+            o_id
+            for item in urunler
+            for o_id in (getattr(item, "opsiyon_ids", None) or [])
+        }
+        opsiyon_map: Dict[int, dict] = {
+            int(row["id"]): row
+            for row in self.urun_repo.get_opsiyonlar_by_ids(sorted(tum_opsiyon_ids))
+        }
+
         for item in urunler:
             u_info = self.urun_repo.get_by_id(item.urun_id)
             if not u_info:
@@ -161,8 +219,12 @@ class SiparisService:
             if not u_info.get("aktif_mi", True):
                 raise HTTPException(status_code=400, detail=f"'{u_info.get('urun_adi')}' isimli ürün satışa kapalıdır.")
 
+            secili_opsiyonlar = self._resolve_line_options(item, opsiyon_map)
             unit_price, line_total = self._calculate_item_authoritative_price(
-                u_info, item, reject_underpriced_claim=reject_underpriced_claim
+                u_info,
+                item,
+                secili_opsiyonlar,
+                reject_underpriced_claim=reject_underpriced_claim,
             )
             order_total += line_total
 
@@ -173,6 +235,7 @@ class SiparisService:
                 "birim_fiyat": unit_price,
                 "urun_notu": item.urun_notu or "",
                 "ara_toplam": line_total,
+                "opsiyon_ids": [int(o["id"]) for o in secili_opsiyonlar],
                 "_stok_miktari": u_info.get("stok_miktari"),
             })
 
@@ -295,6 +358,7 @@ class SiparisService:
                 line["birim_fiyat"],
                 line["urun_notu"],
                 line["ara_toplam"],
+                line.get("opsiyon_ids") or [],
             )
             self._deduct_stock_or_fail(line["urun_id"], line["adet"], line["urun_adi"])
             detaylar.append({k: v for k, v in line.items() if not k.startswith("_")})

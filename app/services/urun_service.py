@@ -3,7 +3,12 @@ from typing import Optional, List
 from app.core.events import event_bus
 from app.repositories.kategori_repo import KategoriRepository
 from app.repositories.urun_repo import UrunRepository
-from app.schemas.catalog import UrunEkleModel, UrunGuncelleModel, UrunResponse
+from app.schemas.catalog import (
+    UrunEkleModel,
+    UrunGuncelleModel,
+    UrunOpsiyonResponse,
+    UrunResponse,
+)
 from app.database import db_transaction
 
 class UrunService:
@@ -37,6 +42,29 @@ class UrunService:
     def get_urunler(self, kategori_id: Optional[int] = None) -> List[UrunResponse]:
         urunler = self.repo.get_all(kategori_id)
         return [UrunResponse(**u) for u in urunler] if urunler else []
+
+    def get_opsiyonlar(self) -> List[UrunOpsiyonResponse]:
+        """Menunun cizecegi urun secenekleri (boy / porsiyon / ekstra).
+
+        Bu liste onceden `static/js/app.js` icinde sabit dizilerdi ve ayni
+        fiyatlar `SiparisService` icinde ikinci kez yaziliydi. Artik tek kaynak
+        `UrunOpsiyonlari` tablosu: istemci de sunucu da ayni satirlari okur.
+        """
+        opsiyonlar = self.repo.get_opsiyonlar()
+        return [
+            UrunOpsiyonResponse(
+                id=o["id"],
+                grup=o["grup"],
+                kod=o["kod"],
+                ad=o["ad"],
+                aciklama=o.get("aciklama"),
+                fiyat_farki=float(o["fiyat_farki"]),
+                fiyat_carpani=(
+                    float(o["fiyat_carpani"]) if o.get("fiyat_carpani") is not None else None
+                ),
+            )
+            for o in opsiyonlar
+        ]
 
     def add_urun(self, data: UrunEkleModel) -> Optional[int]:
         with db_transaction():

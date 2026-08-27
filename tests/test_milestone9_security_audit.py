@@ -211,15 +211,34 @@ class Milestone9SecurityAuditTests(unittest.TestCase):
         item = SiparisItemModel(urun_id=10, adet=2, birim_fiyat=1.0, urun_notu="")
 
         with self.assertRaises(HTTPException) as ctx:
-            self.siparis_service._calculate_item_authoritative_price(db_product, item)
+            self.siparis_service._calculate_item_authoritative_price(db_product, item, [])
         self.assertEqual(ctx.exception.status_code, 400)
-        self.assertIn("düşük olamaz", ctx.exception.detail)
+        self.assertIn("dusuk olamaz", ctx.exception.detail)
 
-        # Legitimate order with option delta: "1.5 Porsiyon" adds 40% (80 TL)
-        item_with_option = SiparisItemModel(urun_id=10, adet=2, birim_fiyat=280.0, urun_notu="1.5 Porsiyon")
-        unit_price, line_total = self.siparis_service._calculate_item_authoritative_price(db_product, item_with_option)
+        # Legitimate order with option delta: the "1.5 Porsiyon" option row
+        # multiplies the catalogue base by 1.4. The surcharge is looked up in
+        # `UrunOpsiyonlari` by id -- it is no longer inferred from the note.
+        bir_bucuk_porsiyon = {
+            "id": 6, "grup": "porsiyon", "kod": "p1_5", "ad": "1.5 Porsiyon",
+            "fiyat_farki": 0.0, "fiyat_carpani": 1.4,
+        }
+        item_with_option = SiparisItemModel(
+            urun_id=10, adet=2, birim_fiyat=280.0, opsiyon_ids=[6]
+        )
+        unit_price, line_total = self.siparis_service._calculate_item_authoritative_price(
+            db_product, item_with_option, [bir_bucuk_porsiyon]
+        )
         self.assertEqual(unit_price, 280.0)
         self.assertEqual(line_total, 560.0)
+
+        # The same note WITHOUT the option id must not move the price at all.
+        item_note_only = SiparisItemModel(
+            urun_id=10, adet=2, birim_fiyat=400.0, urun_notu="1.5 Porsiyon"
+        )
+        unit_only, _ = self.siparis_service._calculate_item_authoritative_price(
+            db_product, item_note_only, []
+        )
+        self.assertEqual(unit_only, 200.0, "serbest metin fiyat kaynagi degildir")
 
     # -------------------------------------------------------------------------
     # Scenario 15: Client manipulates table_id on order submission -> 403

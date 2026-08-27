@@ -104,6 +104,7 @@ scripts/*
 !scripts/update_staff_credential.sql
 # Sema migration'i: sir icermez ve ekipteki herkesin calistirmasi gerekir.
 !scripts/fix_kategori_cascade.py
+!scripts/create_urun_opsiyonlari.py
 
 # Claude Code yerel arac ayarlari
 .claude/

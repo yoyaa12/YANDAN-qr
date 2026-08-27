@@ -9,7 +9,11 @@ from typing import List, Optional
 from fastapi import Depends
 
 from app.database import DatabaseSession, get_db
-from app.schemas.catalog.entity import UrunEntity, UrunWithKategoriEntity
+from app.schemas.catalog.entity import (
+    UrunEntity,
+    UrunOpsiyonEntity,
+    UrunWithKategoriEntity,
+)
 
 
 class UrunRepository:
@@ -30,6 +34,38 @@ class UrunRepository:
         else:
             query = "SELECT u.*, k.kategori_adi FROM Urunler u JOIN Kategoriler k ON u.kategori_id = k.id WHERE u.aktif_mi = 1 AND k.aktif_mi = 1"
             return self.db.execute_query(query) or []
+
+    def get_opsiyonlar(self) -> List[UrunOpsiyonEntity]:
+        """Menüde gösterilecek aktif opsiyonlar.
+
+        İstemci bu listeyi çizer; fiyat farkını da alır ama yalnızca sepette
+        tutarı canlı göstermek için. Sipariş oluşurken fiyat yine burada,
+        sunucuda okunur.
+        """
+        query = """
+            SELECT id, grup, kod, ad, aciklama, fiyat_farki, fiyat_carpani, siralama, aktif_mi
+            FROM UrunOpsiyonlari
+            WHERE aktif_mi = 1
+            ORDER BY grup ASC, siralama ASC
+        """
+        return self.db.execute_query(query) or []
+
+    def get_opsiyonlar_by_ids(self, opsiyon_ids: List[int]) -> List[UrunOpsiyonEntity]:
+        """Fiyatlandırma yolunun tek kaynağı.
+
+        Yalnızca AKTİF satırlar döner. Bu yüzden pasifleştirilmiş bir opsiyonun
+        kimliğini gönderen istemci sessizce indirim almaz: servis katmanı
+        istenen ve bulunan kimlikleri karşılaştırıp eksik olanı reddeder.
+        """
+        if not opsiyon_ids:
+            return []
+        placeholders = ", ".join("?" for _ in opsiyon_ids)
+        query = f"""
+            SELECT id, grup, kod, ad, aciklama, fiyat_farki, fiyat_carpani, siralama, aktif_mi
+            FROM UrunOpsiyonlari
+            WHERE aktif_mi = 1 AND id IN ({placeholders})
+        """
+        return self.db.execute_query(query, tuple(opsiyon_ids)) or []
 
     def get_by_id(self, urun_id: int) -> Optional[UrunEntity]:
         """Tek ürünün tam satırı.

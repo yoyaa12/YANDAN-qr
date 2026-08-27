@@ -50,6 +50,45 @@ class UrunWithKategoriEntity(UrunEntity):
     kategori_adi: str
 
 
+class UrunOpsiyonEntity(TypedDict):
+    """`UrunOpsiyonlari` tablosunun tam satırı.
+
+    Bu tablo, opsiyon fiyat farklarının TEK kaynağıdır. Önceden aynı sayılar
+    hem `static/js/app.js` içinde hem `SiparisService` içinde elle yazılıydı ve
+    aralarındaki tek bağ Türkçe bir metindi; fiyat, müşterinin sipariş notundan
+    türetiliyordu.
+
+    Bir opsiyon ya taban fiyata EKLER (`fiyat_farki`) ya da onu ÇARPAR
+    (`fiyat_carpani`); ikisi birden dolu olamaz, veritabanındaki
+    `CK_UrunOpsiyonlari_tek_mekanizma` kısıtı bunu garanti eder.
+
+    `kod` istemcinin davranış dayanağıdır (örneğin hediye içecek yalnızca
+    `medium` ve `jumbo` boylarında sorulur). Ada bakmak yerine koda bakmak,
+    ürün adı değiştiğinde arayüzün sessizce bozulmasını engeller.
+
+    DDL:
+        id            int            IDENTITY PRIMARY KEY
+        grup          nvarchar(20)   NOT NULL  -- 'boy' | 'porsiyon' | 'ekstra'
+        kod           nvarchar(30)   NOT NULL  UNIQUE
+        ad            nvarchar(100)  NOT NULL
+        aciklama      nvarchar(200)  NULL
+        fiyat_farki   decimal(10,2)  NOT NULL DEFAULT 0
+        fiyat_carpani decimal(6,3)   NULL
+        siralama      int            NOT NULL DEFAULT 0
+        aktif_mi      bit            NOT NULL DEFAULT 1
+    """
+
+    id: int
+    grup: str
+    kod: str
+    ad: str
+    aciklama: Optional[str]
+    fiyat_farki: Decimal
+    fiyat_carpani: Optional[Decimal]
+    siralama: int
+    aktif_mi: bool
+
+
 class KategoriEntity(TypedDict):
     """`Kategoriler` tablosunun tam satırı.
 

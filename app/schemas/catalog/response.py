@@ -28,6 +28,24 @@ class KategoriResponse(BaseModel):
     gorsel_url: Optional[str] = None
 
 
+class UrunOpsiyonResponse(BaseModel):
+    """Menünün ürün seçeneklerini çizmek için ihtiyaç duyduğu her şey.
+
+    Fiyat farkı istemciye de gönderilir: müşteri sepette tutarı anında görmeli.
+    Ancak bu rakam yalnızca GÖSTERİM içindir; sipariş oluşurken sunucu fiyatı
+    istemcinin gönderdiği değere bakmadan bu tablodan yeniden okur
+    (`SiparisService._calculate_item_authoritative_price`).
+    """
+
+    id: int
+    grup: str
+    kod: str
+    ad: str
+    aciklama: Optional[str] = None
+    fiyat_farki: float
+    fiyat_carpani: Optional[float] = None
+
+
 class KaldirilanMenuResponse(BaseModel):
     """Menüden kaldırılmış (pasifleştirilmiş) ürün ve kategoriler.
 

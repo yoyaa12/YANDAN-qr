@@ -6,7 +6,7 @@ durmasının nedeni tam olarak bu — `entity.py` veritabanına, `response.py` d
 dünyaya bakar; burası ikisinin arasındaki hesaplama adımına bakar.
 """
 
-from typing import Optional, TypedDict
+from typing import List, Optional, TypedDict
 
 
 class PricedOrderLine(TypedDict):
@@ -32,6 +32,7 @@ class PricedOrderLine(TypedDict):
     birim_fiyat: float
     urun_notu: str
     ara_toplam: float
+    opsiyon_ids: List[int]
     _stok_miktari: Optional[int]
 
 

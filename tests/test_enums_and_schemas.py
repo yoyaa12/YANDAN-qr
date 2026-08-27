@@ -70,7 +70,12 @@ class EnumAndSchemaTests(unittest.TestCase):
         order = SiparisOlusturModel.model_validate(payload)
 
         self.assertEqual(order.odeme_yontemi, PaymentMethod.WAITER_AT_CASHIER)
-        self.assertEqual(order.model_dump(mode="json"), payload)
+        # `opsiyon_ids` sonradan eklendi ve varsayilani bos listedir: eski bir
+        # istemci alani hic gondermese de istek gecerli kalir. Karsilastirma
+        # bu yuzden alani ekleyerek yapilir, geriye donuk uyumun kaniti budur.
+        beklenen = dict(payload)
+        beklenen["urunler"] = [dict(u, opsiyon_ids=[]) for u in payload["urunler"]]
+        self.assertEqual(order.model_dump(mode="json"), beklenen)
         self.assertIs(CompatibilityOrderModel, SiparisOlusturModel)
 
     def test_arbitrary_order_status_is_rejected(self):

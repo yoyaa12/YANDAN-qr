@@ -4136,3 +4136,205 @@ Aynı gün yapılan taşıma düzeltmesinin kapsamadığı iki durum kapandı.
 - Önceki girdideki kullanıcı kararları hâlâ açık: teslim edilmemiş sipariş için
   kasa tahsilatının engellenmesi, `MasaTahsilatlari.siparis_id`, geçmiş adisyon
   ekranı.
+
+---
+
+### 2026-08-27 (3) - Ürün opsiyonları veri modeline taşındı: fiyat artık metinden değil katalogdan
+
+#### Summary
+
+Opsiyon fiyat farkları (pizza boyu, porsiyon çarpanı, ekstra malzeme) hiçbir
+tabloda yoktu. Aynı sayılar İKİ ayrı yerde, iki ayrı dilde elle yazılıydı ve
+aralarındaki tek bağ Türkçe bir metindi:
+
+    static/js/app.js                  PIZZA_SIZES / PORTION_OPTIONS / DESSERT_EXTRAS
+    app/services/siparis_service.py   "Büyük Boy" in note -> += 85.0
+
+Sunucu, güvendiği kaynakta (katalog) opsiyon bulamadığı için fiyatı müşterinin
+serbest metninden türetmek zorundaydı. Bunun üç somut sonucu vardı ve üçü de
+aynı kökten geliyordu:
+
+1. **Ölü kod.** `"En Büyük Boy"` metni `"Büyük Boy"` metnini içerdiği için
+   `elif` zinciri ikinci dalda kapanıyordu; `+140` satırına hiçbir girdiyle
+   ulaşılamıyordu. En pahalı boy bir alt boyun fiyatına satılıyordu (ürün
+   başına 55 TL kayıp).
+2. **Sıraya bağlı fiyat.** Notta iki boy birden geçerse fiyatı `elif`
+   zincirindeki sıra belirliyordu; `Orta Boy` ilk sırada olduğu için ucuz olan
+   kazanıyordu.
+3. **Notun fiyatı etkilemesi.** Müşterinin not kutusuna yazdığı metin fiyat
+   hesabına giriyordu.
+
+Ayrıca istemci boyut/porsiyon adını `urun_adi`'ya yazıyor, `urun_adi` ise
+sunucuya hiç gönderilmiyordu. Yani NORMAL akışta boy farkı zaten hiç
+uygulanmıyordu: menüde 285 TL görünen pizza veritabanına 200 TL yazılıyordu.
+
+Artık fiyat farkı `UrunOpsiyonlari` tablosundan, müşterinin TIKLADIĞI
+seçeneklerin kimlikleri üzerinden okunur. `urun_notu` fiyat hesabına hiç
+girmez.
+
+#### Files created
+
+- `scripts/create_urun_opsiyonlari.py` - şema betiği (`--rollback` destekli)
+- `tests/frontend/product_options_from_catalog.test.cjs`
+
+#### Files modified
+
+- `app/schemas/catalog/entity.py` - `UrunOpsiyonEntity`
+- `app/schemas/catalog/response.py` - `UrunOpsiyonResponse`
+- `app/schemas/catalog/__init__.py` - dışa aktarımlar
+- `app/schemas/orders/request.py` - `SiparisItemModel.opsiyon_ids` + doğrulayıcı,
+  `MAX_LINE_OPTIONS`
+- `app/schemas/orders/response.py` - `SiparisDetayResponse.opsiyon_ids`
+- `app/schemas/orders/entity.py` - `SiparisDetayEntity.opsiyon_ids`
+- `app/schemas/orders/dto.py` - `PricedOrderLine.opsiyon_ids`
+- `app/repositories/urun_repo.py` - `get_opsiyonlar`, `get_opsiyonlar_by_ids`
+- `app/repositories/siparis_repo.py` - `create_siparis_detay` artık kalem
+  kimliğini `OUTPUT INSERTED.id` ile döndürüp opsiyonları yazıyor;
+  `get_opsiyon_ids_for_siparis`, `delete_detay_opsiyonlari_for_siparis`;
+  `get_siparis_detaylari` ve `replace_siparis_items` güncellendi
+- `app/services/siparis_service.py` - `_resolve_line_options` eklendi,
+  `_calculate_item_authoritative_price` yeniden yazıldı (metin eşleşmesi
+  tamamen kaldırıldı), `_price_items_authoritatively` opsiyonları tek sorguda
+  çekiyor
+- `app/services/urun_service.py` - `get_opsiyonlar`
+- `app/api/v1/endpoints/urunler.py` - `GET /api/urun-opsiyonlari`
+- `static/js/app.js` - sabit diziler kaldırıldı, `loadMenuOptions()` eklendi,
+  sepet ve sipariş gövdesi `opsiyon_ids` taşıyor, boyut/porsiyon adı nota da
+  yazılıyor
+- `static/js/waiter.js` - düzenleme `opsiyon_ids`'i geri gönderiyor
+- `tests/test_order_business_rules.py`, `tests/test_order_edit_authorization.py`,
+  `tests/test_enums_and_schemas.py`, `tests/test_milestone9_security_audit.py`
+
+#### Files deleted
+
+- None
+
+#### Database / migrations
+
+**ŞEMA DEĞİŞİKLİĞİ YAPILDI — kullanıcı onayı alındı (2026-08-27).**
+DDL iş kodunda değil, `scripts/create_urun_opsiyonlari.py` içindedir (§30).
+
+İki yeni tablo:
+
+- `UrunOpsiyonlari` (id, grup, kod, ad, aciklama, fiyat_farki, fiyat_carpani,
+  siralama, aktif_mi) + `UQ_UrunOpsiyonlari_kod`, `UQ_UrunOpsiyonlari_grup_ad`
+  ve dört CHECK kısıtı: `grup IN ('boy','porsiyon','ekstra')`,
+  `fiyat_farki >= 0`, `fiyat_carpani > 0`, ve bir opsiyonun ya EKLEyeceği ya
+  ÇARPAcağı (`fiyat_carpani IS NULL OR fiyat_farki = 0`).
+- `SiparisDetayOpsiyonlari` (id, siparis_detay_id -> SiparisDetaylari.id,
+  opsiyon_id -> UrunOpsiyonlari.id) + benzersizlik kısıtı.
+
+11 opsiyon satırı eski sabit listelerden birebir aktarıldı. Betik idempotenttir
+ve var olan fiyatları EZMEZ. `--rollback` ile geri alınır.
+
+Mevcut sipariş kayıtlarına dokunulmadı; eski kalemler `opsiyon_ids = []` ile
+okunur.
+
+#### API changes
+
+- **YENİ:** `GET /api/urun-opsiyonlari` - menü ile aynı erişim seviyesinde
+  (kimliksiz), opsiyonları ve fiyat farklarını döner.
+- `POST /api/siparisler` ve `PUT /api/siparisler/{id}`: kalemler artık isteğe
+  bağlı `opsiyon_ids` alanı kabul ediyor. Alan gönderilmezse boş liste sayılır,
+  yani **eski istemciler bozulmaz** (bkz. `test_enums_and_schemas`).
+- `SiparisDetayResponse` artık `opsiyon_ids` taşıyor.
+
+#### Authentication / authorization changes
+
+- None. Yetki modeli değişmedi.
+
+#### Tests added or modified
+
+- `tests/test_order_business_rules.py` - 6 yeni/yeniden yazılmış test: fiyat
+  katalogdan geliyor, not fiyatı değiştirmiyor, en pahalı boy artık
+  ulaşılabilir, çarpan opsiyonu taban fiyatı ölçekliyor, bilinmeyen kimlik
+  reddediliyor, aynı gruptan iki seçenek reddediliyor.
+- `tests/test_order_edit_authorization.py` - düzenleme yolunda not fiyatı
+  değiştirmiyor; opsiyonlar düzenlemeden sağ çıkıyor; repo sözleşmesi
+  `OUTPUT INSERTED.id` ve silme sırasına göre güncellendi.
+- `tests/test_milestone9_security_audit.py` - senaryo 14, opsiyon farkının
+  kimlikten geldiğini ve aynı metnin kimliksiz fiyatı oynatmadığını doğruluyor.
+- `tests/frontend/product_options_from_catalog.test.cjs` - 8 test: sabit fiyat
+  listeleri geri gelmedi, seçenekler API'den çekiliyor, yükleme hatası ürünü
+  engellemiyor, sipariş ve düzenleme gövdeleri `opsiyon_ids` taşıyor, seçim
+  toplama bloğu izole çalıştırılıp doğru kimlikleri ürettiği doğrulandı.
+
+#### Tests executed
+
+- `python -m unittest discover -s tests -p "test_*.py"`
+- `node --test "tests/frontend/*.test.cjs"`
+
+#### Test results
+
+- Python: **372 test, OK** (önce 365; net +7).
+- Frontend: **164 test, 164 pass** (önce 156; +8).
+
+#### Verification performed
+
+- **Fiyat zinciri canlı veritabanıyla uçtan uca çalıştırıldı (16/16 geçti).**
+  Gerçek ürün (#5 Künefe, taban 160 TL) üzerinde: kimlikle Orta/Büyük/En Büyük
+  Boy sırasıyla 200 / 245 / **300** TL üretti — en pahalı boy artık
+  ulaşılabilir. 1.5 Porsiyon 224 TL (160 x 1.4). Boy + ekstra birlikte 280 TL.
+  Altı ayrı kurcalanmış not metni ("En Büyük Boy", "1.5 Porsiyon", aynı ifadeyi
+  üç kez tekrar eden metin dahil) fiyatı 160 TL'de bıraktı. Bilinmeyen kimlik,
+  aynı gruptan iki seçenek ve taban altı fiyat iddiası 400 ile reddedildi.
+- **Kalıcılık ve geri okuma açık transaction içinde doğrulanıp ROLLBACK edildi
+  (8/8 geçti):** kalem kimliği dönüyor, iki opsiyon satırı yazılıyor,
+  `get_siparis_detaylari` `[3, 8]` olarak geri veriyor, opsiyonsuz kalem boş
+  liste dönüyor, `replace_siparis_items` foreign key'e takılmıyor ve yetim
+  opsiyon satırı bırakmıyor.
+- Migration betiği iki kez çalıştırıldı; ikinci çalıştırma 0 yeni satır ekledi
+  (idempotent).
+- Tarayıcıda gözle doğrulanmadı (kasa/menü giriş kimliği bu oturumda yok).
+
+#### Security impact
+
+- Saldırı yüzeyi DARALDI: müşterinin serbest metni artık fiyat hesabına hiç
+  girmiyor. Önceden not kutusuna "Orta Boy" yazan biri fiyatı oynatabiliyordu.
+- Pasifleştirilmiş bir opsiyonun kimliğini gönderen istemci sessizce indirim
+  almaz: `get_opsiyonlar_by_ids` yalnızca `aktif_mi = 1` satırları döner ve
+  servis, istenen ile bulunan kimlikleri karşılaştırıp eksik olanı reddeder.
+- Taban fiyat altı iddiası reddi korundu.
+- Veritabanı CHECK kısıtları, uygulama katmanı atlansa bile geçersiz opsiyon
+  satırı yazılmasını engelliyor.
+
+#### Architectural decisions
+
+- Opsiyonlar tek bir tabloda, `grup` kolonuyla ayrıştırıldı. Ürün-opsiyon
+  eşleşmesi (hangi ürüne hangi grup sorulacağı) hâlâ istemcide kategori/ad
+  eşleşmesiyle belirleniyor; bu bir GÖSTERİM kararıdır ve fiyatı etkilemez.
+  Veri modeline taşınması ayrı bir iştir.
+- İstemcideki `id` alanı bilinçli olarak veritabanı kimliği değil `kod`
+  değeridir ('small', 'medium', 'p1_5'). Seçim mantığı ve hediye içecek kuralı
+  koda bakar, ürün adı değişince bozulmaz. Sunucuya giden sayısal kimlik ayrı
+  alanda (`opsiyonId`) durur.
+- `create_siparis_detay` yeni kimliği `OUTPUT INSERTED.id` ile alıyor.
+  `execute_non_query` kimliği ayrı bir batch'te `SCOPE_IDENTITY()` ile okuyor;
+  SCOPE_IDENTITY başka bir batch'ten çağrıldığında NULL döner. Kimlik burada
+  zorunlu olduğu için INSERT'in kendisinden alındı. (Bu, `create_siparis`
+  içindeki "kimlik gelmezse siparis_kodu ile ara" yedeğinin neden var olduğunu
+  da açıklıyor.)
+- Boyut ve porsiyon adı artık `urun_notu`'ya da yazılıyor. Ürün adı sunucuya
+  hiç gönderilmediği için mutfak ve kasa bu bilgiyi hiçbir yerde göremiyordu;
+  not fiyatı etkilemediğinden bunu yazmak artık güvenli.
+- Hediye içecek listeleri (`FREE_DRINKS_*`) istemcide sabit bırakıldı: ücretsiz
+  oldukları için fiyat kaynağı değiller.
+
+#### Known issues / unfinished work
+
+- Hangi ürüne hangi opsiyon grubunun sorulacağı hâlâ istemcide ad/kategori
+  eşleşmesiyle belirleniyor (`isPizza`, `isDish`). Fiyatı etkilemez ama
+  restoran yeni bir ürüne opsiyon bağlayamaz; bunun için ürün-opsiyon ilişki
+  tablosu gerekir.
+- `Siparisler.odeme_yontemi` kolonu hâlâ yok (bkz. IMPLEMENTATION_STATUS
+  blocker 3'ün ikinci yarısı). Bu iş yalnızca opsiyon yarısını kapattı.
+- Opsiyon yönetimi için admin ekranı yok: yeni opsiyon şu an ancak SQL ile
+  eklenir. Tablo hazır olduğu için CRUD eklemek artık düz bir iş.
+
+#### Next action
+
+- Demo öncesi elle bir tur: boy seçip sipariş ver, kasadaki tutarın menüdeki
+  tutarla aynı olduğunu doğrula.
+- Önceki girdilerden bekleyen kararlar açık: teslim edilmemiş sipariş için kasa
+  tahsilatının engellenmesi, `MasaTahsilatlari.siparis_id`, geçmiş adisyon
+  ekranı.

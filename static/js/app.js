@@ -86,13 +86,19 @@ function getCategoryIcon(catName) {
     return '🍴';
 }
 
-// PIZZA BOYUTLARI
-const PIZZA_SIZES = [
-    { id: 'small', name: 'Küçük Boy', detail: '20 cm • 1 Kişilik', priceDiff: 0 },
-    { id: 'medium', name: 'Orta Boy', detail: '26 cm • 1-2 Kişilik (🎁 Hediye İçecekli)', priceDiff: 40.00 },
-    { id: 'large', name: 'Büyük Boy', detail: '32 cm • 2-3 Kişilik', priceDiff: 85.00 },
-    { id: 'jumbo', name: 'En Büyük Boy', detail: '40 cm • 3-4 Kişilik (🎁 Hediye İçecekli)', priceDiff: 140.00 }
-];
+// ÜRÜN SEÇENEKLERİ
+//
+// Bu diziler eskiden burada SABİT yazılıydı ve aynı fiyat farkları ikinci kez
+// `SiparisService` içinde Python olarak duruyordu. İki kopya arasındaki tek bağ
+// Türkçe bir metindi: sunucu fiyatı `"Orta Boy" in urun_notu` gibi arama
+// yaparak buluyordu. Artık tek kaynak `UrunOpsiyonlari` tablosu; aşağıdaki
+// diziler `/api/urun-opsiyonlari` yanıtından doldurulur.
+//
+// `id` alanı bilinçli olarak veritabanı kimliği DEĞİL, `kod` değeridir
+// ('small', 'medium', 'p1_5', ...): seçim mantığı ve hediye içecek kuralı
+// buna bakar ve ürün adı değiştiğinde bozulmaz. Sunucuya gönderilen sayısal
+// kimlik ayrı alanda durur: `opsiyonId`.
+let PIZZA_SIZES = [];
 
 // ORTA BOY HEDİYE İÇECEK SEÇENEKLERİ (1L veya 2 Büyük Ayran)
 const FREE_DRINKS_MEDIUM = [
@@ -111,11 +117,7 @@ const FREE_DRINKS_JUMBO = [
 ];
 
 // PORSIYON SEÇENEKLERİ (YEMEKLER / IZGARALAR İÇİN)
-const PORTION_OPTIONS = [
-    { id: 'p1', name: '1 Porsiyon', detail: 'Standart Porsiyon', multiplier: 1.0 },
-    { id: 'p1_5', name: '1.5 Porsiyon', detail: '%40 Ekstra Porsiyon', multiplier: 1.40 },
-    { id: 'p2', name: '2 Porsiyon (Çift)', detail: 'Doyurucu Çift Porsiyon', multiplier: 1.80 }
-];
+let PORTION_OPTIONS = [];
 
 // İÇECEK / YEMEK ÇİPLERİ
 const CUSTOM_CHIPS_MAP = {
@@ -144,12 +146,48 @@ const CUSTOM_CHIPS_MAP = {
 };
 
 // TATLI EKSTRALARI
-const DESSERT_EXTRAS = [
-    { id: 'kaymak', name: 'Ekstra Manda Kaymağı', price: 35.00 },
-    { id: 'dondurma', name: 'Ekstra Maraş Dondurması', price: 40.00 },
-    { id: 'cikolata', name: 'Ekstra Belçika Çikolata Sosu', price: 25.00 },
-    { id: 'fistik', name: 'Ekstra Antep Fıstığı Tozu', price: 30.00 }
-];
+let DESSERT_EXTRAS = [];
+
+/**
+ * Seçenekleri sunucudan yükler.
+ *
+ * Yanıttaki `fiyat_farki` yalnızca sepette tutarı canlı göstermek içindir.
+ * Sipariş oluşurken sunucu aynı satırları kendisi okur ve buradan gönderilen
+ * hiçbir tutara bakmaz; istemci yalnızca HANGİ seçeneğin tıklandığını
+ * (`opsiyonId`) bildirir.
+ */
+async function loadMenuOptions() {
+    try {
+        const res = await fetch('/api/urun-opsiyonlari');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const rows = await res.json();
+
+        const map = (grup) => rows
+            .filter(r => r.grup === grup)
+            .map(r => ({
+                id: r.kod,
+                opsiyonId: r.id,
+                name: r.ad,
+                detail: r.aciklama || '',
+                priceDiff: Number(r.fiyat_farki) || 0,
+                multiplier: (r.fiyat_carpani === null || r.fiyat_carpani === undefined)
+                    ? 1.0
+                    : Number(r.fiyat_carpani)
+            }));
+
+        PIZZA_SIZES = map('boy');
+        PORTION_OPTIONS = map('porsiyon');
+        DESSERT_EXTRAS = map('ekstra').map(o => ({ ...o, price: o.priceDiff }));
+    } catch (e) {
+        // Seçenekler gelmediyse ürün yine sipariş edilebilir, sadece taban
+        // fiyatından. Sessizce yanlış bir fiyat göstermektense seçenek
+        // bölümlerini hiç açmamak doğru davranış.
+        console.error('Ürün seçenekleri yüklenemedi:', e);
+        PIZZA_SIZES = [];
+        PORTION_OPTIONS = [];
+        DESSERT_EXTRAS = [];
+    }
+}
 
 
 function showSecurityError(msg) {
@@ -628,7 +666,8 @@ async function loadMenuData() {
     try {
         const [catRes, prodRes] = await Promise.all([
             fetch('/api/kategoriler'),
-            fetch('/api/urunler')
+            fetch('/api/urunler'),
+            loadMenuOptions()
         ]);
         state.kategoriler = await catRes.json();
         state.urunler = await prodRes.json();
@@ -1031,6 +1070,7 @@ function quickAddToCart(event, productId, delta = 1) {
                 birim_fiyat: prod.fiyat,
                 adet: 1,
                 urun_notu: '',
+                opsiyon_ids: [],
                 ara_toplam: prod.fiyat
             });
             notifyCartUpdateToSocket();
@@ -1073,9 +1113,12 @@ function openProductNoteModal(productId) {
     }
 
     state.currentProduct = prod;
-    state.selectedSize = PIZZA_SIZES[0];
+    // Seçenekler yüklenememişse `undefined` yerine açıkça `null`: aşağıdaki
+    // `state.selectedSize && ...` kontrolleri o zaman doğru şekilde atlanır ve
+    // ürün taban fiyatından sipariş edilir.
+    state.selectedSize = PIZZA_SIZES[0] || null;
     state.selectedFreeDrink = null;
-    state.selectedPortion = PORTION_OPTIONS[0];
+    state.selectedPortion = PORTION_OPTIONS[0] || null;
     state.selectedExtras = [];
     state.activeNotes = [];
 
@@ -1116,11 +1159,11 @@ function openProductNoteModal(productId) {
 
     if (freeDrinkSection) freeDrinkSection.style.display = 'none';
 
-    if (isPizza) {
+    if (isPizza && PIZZA_SIZES.length > 0) {
         if (pizzaSection) pizzaSection.style.display = 'block';
         if (portionSection) portionSection.style.display = 'none';
         renderPizzaSizes();
-    } else if (isDish) {
+    } else if (isDish && PORTION_OPTIONS.length > 0) {
         if (pizzaSection) pizzaSection.style.display = 'none';
         if (portionSection) portionSection.style.display = 'block';
         renderPortionSizes();
@@ -1377,22 +1420,35 @@ function confirmAddToCart() {
     const isPizza = prodName.includes('pizza') || catName.includes('pizza');
     const isDish = catName.includes('ana yemek') || catName.includes('izgara') || catName.includes('kebap') || catName.includes('yemek') || prodName.includes('kofte') || prodName.includes('köfte') || prodName.includes('döner') || prodName.includes('doner') || prodName.includes('tavuk') || prodName.includes('et') || prodName.includes('izgara');
 
+    // Sunucuya gidecek olan BU listedir. Fiyat farkı sunucuda bu kimliklerle
+    // `UrunOpsiyonlari` tablosundan okunur; aşağıda hesaplanan tutar yalnızca
+    // müşteriye anında göstermek içindir.
+    const secilenOpsiyonIds = [];
+
     if (isPizza && state.selectedSize) {
         calculatedUnitPrice += state.selectedSize.priceDiff;
         fullTitle += ` (${state.selectedSize.name})`;
+        if (state.selectedSize.opsiyonId) secilenOpsiyonIds.push(state.selectedSize.opsiyonId);
+        // Boyut artık nota da yazılıyor. Ürün adı sunucuya hiç gönderilmediği
+        // için mutfak ve kasa bu bilgiyi hiçbir yerde göremiyordu. Not artık
+        // fiyatı etkilemediğinden bunu yazmak güvenli.
+        combinedNotes.push(state.selectedSize.name);
         if (state.selectedFreeDrink) {
             combinedNotes.push(`🎁 Hediye: ${state.selectedFreeDrink.name}`);
         }
     } else if (isDish && state.selectedPortion) {
         calculatedUnitPrice = calculatedUnitPrice * state.selectedPortion.multiplier;
+        if (state.selectedPortion.opsiyonId) secilenOpsiyonIds.push(state.selectedPortion.opsiyonId);
         if (state.selectedPortion.multiplier !== 1.0) {
             fullTitle += ` (${state.selectedPortion.name})`;
+            combinedNotes.push(state.selectedPortion.name);
         }
     }
 
     if (state.selectedExtras.length > 0) {
         state.selectedExtras.forEach(ex => {
             calculatedUnitPrice += ex.price;
+            if (ex.opsiyonId) secilenOpsiyonIds.push(ex.opsiyonId);
             combinedNotes.push(`+ ${ex.name}`);
         });
     }
@@ -1406,6 +1462,7 @@ function confirmAddToCart() {
         birim_fiyat: calculatedUnitPrice,
         adet: quantity,
         urun_notu: combinedNotes.join(' • '),
+        opsiyon_ids: secilenOpsiyonIds,
         ara_toplam: calculatedUnitPrice * quantity
     });
 
@@ -1783,7 +1840,8 @@ async function executeOrderSubmit(odemeYontemi) {
             urun_id: item.urun_id,
             adet: item.adet,
             birim_fiyat: item.birim_fiyat,
-            urun_notu: item.urun_notu
+            urun_notu: item.urun_notu,
+            opsiyon_ids: item.opsiyon_ids || []
         }))
     };
 

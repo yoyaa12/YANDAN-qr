@@ -983,12 +983,24 @@ and known limits.
    exists live with `session_token_hash, masa_id, device_id, created_at,
    expires_at, is_active`. `MasaTahsilatlari` (Milestone 8) is also live.
 
-3. **Payment/option data-model decision:** STILL OPEN. Option pricing is derived
-   from Turkish substrings in `urun_notu`
-   (`"Orta Boy" in note` -> +40 TL, and so on) inside
-   `SiparisService._calculate_item_authoritative_price`. Moving it into the
-   catalogue is a schema change and needs approval. `Siparisler` also still has
-   no `odeme_yontemi` column, so the payment method is lost on read-back.
+3. **Payment/option data-model decision:** HALF RESOLVED 2026-08-27.
+
+   - Option pricing: **RESOLVED and APPLIED.** The user approved the schema
+     change on 2026-08-27. `UrunOpsiyonlari` and `SiparisDetayOpsiyonlari` are
+     live (`scripts/create_urun_opsiyonlari.py`, `--rollback` supported).
+     Prices are now read from the catalogue by option id; `urun_notu` no longer
+     takes any part in pricing. This also removed three defects the substring
+     matching produced: the `+140` branch was dead code (`"En Büyük Boy"`
+     contains `"Büyük Boy"`, so the `elif` chain closed one branch early), two
+     sizes in one note let the chain order decide the price, and a customer's
+     free-text note could move the price. Verified end to end against the live
+     database (16/16) plus a rolled-back persistence check (8/8).
+   - Still open: which option group applies to which product is decided in the
+     client by name/category matching (`isPizza`, `isDish`). It does not affect
+     price, but the restaurant cannot attach options to a new product without a
+     product-option link table.
+   - Still open, unchanged: `Siparisler` has no `odeme_yontemi` column, so the
+     payment method chosen at order time is lost on read-back.
 
 4. **Stock oversell fix:** RESOLVED. The user approved the behaviour change on
    2026-08-17 and it is implemented: a lost stock race now returns `HTTP 409`

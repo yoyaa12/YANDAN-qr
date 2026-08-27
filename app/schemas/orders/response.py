@@ -25,6 +25,10 @@ class SiparisDetayResponse(BaseModel):
     birim_fiyat: float
     urun_notu: str
     ara_toplam: float
+    # Bu kalemde seçilmiş opsiyonların kimlikleri. Personelin sipariş düzenleme
+    # ekranı kalemi olduğu gibi geri gönderebilmek için buna muhtaç: alan
+    # olmasaydı bir düzenleme, siparişin opsiyon farkını sessizce sıfırlardı.
+    opsiyon_ids: List[int] = Field(default_factory=list)
 
 
 class SiparisResponse(BaseModel):

@@ -1161,6 +1161,7 @@ window.addSelectedProductToEditOrder = function () {
             adet: 1,
             birim_fiyat: prod.fiyat,
             urun_notu: '',
+            opsiyon_ids: [],
             ara_toplam: prod.fiyat
         });
     }
@@ -1204,7 +1205,11 @@ window.saveEditedOrder = async function () {
             urun_id: i.urun_id,
             adet: i.adet,
             birim_fiyat: i.birim_fiyat,
-            urun_notu: i.urun_notu || ''
+            urun_notu: i.urun_notu || '',
+            // Kalem olduğu gibi geri gönderilir. Bu alan olmasaydı bir
+            // "kaydet" tıklaması siparişin opsiyon farkını sessizce sıfırlar,
+            // büyük boy pizzayı taban fiyatına düşürürdü.
+            opsiyon_ids: i.opsiyon_ids || []
         }))
     };
 

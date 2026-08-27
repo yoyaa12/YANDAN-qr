@@ -13,7 +13,7 @@ Bu dosyayı okurken dikkat edilmesi gereken iki nokta:
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional, TypedDict
+from typing import List, Optional, TypedDict
 
 
 class SiparisEntity(TypedDict):
@@ -84,6 +84,11 @@ class SiparisDetayEntity(TypedDict):
     birim_fiyat: Decimal
     urun_notu: Optional[str]
     ara_toplam: Decimal
+    # Tablodan gelmez: `SiparisRepository.get_siparis_detaylari` satiri
+    # okuduktan sonra `SiparisDetayOpsiyonlari` tablosundan doldurur. Burada
+    # bildirilmesinin nedeni, satiri tuketen kodun alanin var oldugunu
+    # SQL metnini okumadan gorebilmesi.
+    opsiyon_ids: List[int]
 
 
 class SiparisDetayWithUrunEntity(SiparisDetayEntity):

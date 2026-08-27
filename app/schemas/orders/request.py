@@ -20,6 +20,13 @@ from app.enums import OrderAction, OrderStatus, PaymentMethod
 MAX_LINE_QUANTITY = 50
 
 
+# Tek kalemde seçilebilecek en fazla opsiyon sayısı. Grup başına yalnızca bir
+# opsiyona izin verildiği için (bkz. `SiparisService._resolve_line_options`)
+# gerçek tavan zaten grup sayısıdır; bu sınır, uzun bir id listesiyle sorgu
+# şişirmeyi engelleyen kaba bir korumadır.
+MAX_LINE_OPTIONS = 12
+
+
 class SiparisItemModel(BaseModel):
     """Sepetteki tek kalem.
 
@@ -27,12 +34,33 @@ class SiparisItemModel(BaseModel):
     `SiparisService._price_items_authoritatively` içinde `Urunler` tablosundan
     gelen fiyatla değiştirir. Alanın tutulmasının tek nedeni, katalog fiyatının
     altında bir iddianın kurcalama sinyali olarak reddedilebilmesidir.
+
+    `opsiyon_ids` müşterinin TIKLADIĞI seçeneklerin `UrunOpsiyonlari.id`
+    değerleridir. Fiyat farkı bu kimlikler üzerinden veritabanından okunur.
+    Önceden böyle bir alan yoktu ve sunucu farkı `urun_notu` metninin içinde
+    "Büyük Boy" gibi ifadeler arayarak buluyordu; artık NOT FİYATI ETKİLEMEZ,
+    yalnızca mutfağa/kasaya gösterilir.
     """
 
     urun_id: int = Field(gt=0)
     adet: int = Field(gt=0, le=MAX_LINE_QUANTITY)
     birim_fiyat: float = Field(ge=0)
     urun_notu: Optional[str] = Field(default="", max_length=255)
+    opsiyon_ids: List[int] = Field(default_factory=list, max_length=MAX_LINE_OPTIONS)
+
+    @field_validator("opsiyon_ids")
+    @classmethod
+    def validate_opsiyon_ids(cls, value: List[int]) -> List[int]:
+        """Pozitif ve tekrarsız kimlikler.
+
+        Aynı kimliğin iki kez gönderilmesi sessizce tekilleştirilmez, reddedilir:
+        istemcinin ne istediği belirsizse fiyat da belirsizdir.
+        """
+        if any(v <= 0 for v in value):
+            raise ValueError("Geçersiz opsiyon kimliği.")
+        if len(set(value)) != len(value):
+            raise ValueError("Aynı opsiyon birden fazla kez gönderilemez.")
+        return value
 
 
 class SiparisOlusturModel(BaseModel):
